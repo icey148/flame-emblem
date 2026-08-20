@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 在战棋地图上绘制 2D 人物小人，并负责把逻辑格移动表现成连续的逐格行走动画。
-/// 正式 map.png 存在时优先绘制纹理；没有素材时继续使用程序绘制人物，因此开发阶段不会被美术进度阻塞。
+/// 地图人物优先使用方向化多帧像素动画；素材不完整时依次回退到单张 map.png 和程序绘制人物。
 /// </summary>
 public partial class UnitCharacterLayer : Node2D
 {
@@ -43,8 +43,26 @@ public partial class UnitCharacterLayer : Node2D
     /// <summary>当前正在播放的单位移动动画。</summary>
     private readonly Dictionary<string, UnitMotion> _motions = new(StringComparer.Ordinal);
 
+    /// <summary>保存每个单位最后一次面朝方向，静止后继续保持移动结束时的朝向。</summary>
+    private readonly Dictionary<string, CharacterFacing> _facings = new(StringComparer.Ordinal);
+
     /// <summary>单格行走动画耗时；保持短促，避免战棋操作拖沓。</summary>
     private const float SecondsPerTile = 0.14f;
+
+    /// <summary>真正序列帧行走动画的默认播放速度。</summary>
+    private const float WalkFramesPerSecond = 9.0f;
+
+    /// <summary>真正序列帧待机动画的默认播放速度。</summary>
+    private const float IdleFramesPerSecond = 2.5f;
+
+    /// <summary>
+    /// 节点进入场景后使用最近邻纹理过滤。
+    /// 这样低分辨率人物帧被放大时保持清晰像素边缘，不会被线性采样抹糊。
+    /// </summary>
+    public override void _Ready()
+    {
+        TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
+    }
 
     /// <summary>
     /// 每帧检测逻辑位置变化、推进逐格移动和待机动画，并请求重绘。
@@ -80,6 +98,7 @@ public partial class UnitCharacterLayer : Node2D
             if (!_lastGridPositions.TryGetValue(unit.Id, out Vector2I previous))
             {
                 _lastGridPositions[unit.Id] = unit.GridPosition;
+                _facings.TryAdd(unit.Id, CharacterFacing.Down);
                 continue;
             }
 
@@ -93,12 +112,13 @@ public partial class UnitCharacterLayer : Node2D
             _lastGridPositions[unit.Id] = unit.GridPosition;
         }
 
-        // 已经从章节中移除或死亡的单位不再保留位置缓存，避免长期章节中无意义增长。
+        // 已经从章节中移除或死亡的单位不再保留视觉缓存，避免长期章节中无意义增长。
         HashSet<string> liveIds = Units.Where(unit => unit.IsAlive).Select(unit => unit.Id).ToHashSet(StringComparer.Ordinal);
         foreach (string staleId in _lastGridPositions.Keys.Where(id => !liveIds.Contains(id)).ToList())
         {
             _lastGridPositions.Remove(staleId);
             _motions.Remove(staleId);
+            _facings.Remove(staleId);
         }
     }
 
@@ -128,13 +148,21 @@ public partial class UnitCharacterLayer : Node2D
 
     /// <summary>
     /// 绘制单个地图人物。
-    /// 正式纹理和程序占位模型共享同一动画状态，因此替换美术后行走/选中/行动反馈仍然保留。
+    /// 有方向序列帧时真正切帧；没有多帧素材时继续兼容旧单图和程序占位模型。
     /// </summary>
     private void DrawUnit(UnitModel unit)
     {
         Vector2 visualCenter = ResolveVisualCenter(unit);
-        Vector2 animationOffset = AnimationOffset(unit);
-        Vector2 characterCenter = visualCenter + animationOffset;
+        bool moving = _motions.ContainsKey(unit.Id);
+        CharacterFacing facing = ResolveFacing(unit);
+        CharacterAnimationState animationState = moving
+            ? CharacterAnimationState.Walk
+            : CharacterAnimationState.Idle;
+
+        Texture2D? animationFrame = ResolveAnimationFrame(unit, animationState, facing);
+        Vector2 fallbackOffset = animationFrame is null ? AnimationOffset(unit) : Vector2.Zero;
+        Vector2 characterCenter = visualCenter + fallbackOffset;
+
         Color teamColor = unit.Team == UnitTeam.Player
             ? new Color(0.20f, 0.52f, 1.0f)
             : new Color(0.93f, 0.24f, 0.24f);
@@ -148,14 +176,21 @@ public partial class UnitCharacterLayer : Node2D
         DrawCircle(visualCenter + new Vector2(0, 11), 20.0f, new Color(0.04f, 0.05f, 0.07f, 0.92f));
         DrawCircle(visualCenter + new Vector2(0, 11), 20.5f, teamColor, false, 3.0f);
 
-        Texture2D? mapTexture = CharacterAssetResolver.TryLoad(unit, CharacterArtSlot.Map);
-        if (mapTexture is not null)
+        if (animationFrame is not null)
         {
-            DrawMapTexture(unit, mapTexture, characterCenter);
+            DrawMapTexture(unit, animationFrame, characterCenter);
         }
         else
         {
-            DrawProceduralUnit(unit, characterCenter);
+            Texture2D? mapTexture = CharacterAssetResolver.TryLoad(unit, CharacterArtSlot.Map);
+            if (mapTexture is not null)
+            {
+                DrawMapTexture(unit, mapTexture, characterCenter);
+            }
+            else
+            {
+                DrawProceduralUnit(unit, characterCenter);
+            }
         }
 
         if (ReferenceEquals(unit, SelectedUnit))
@@ -163,6 +198,62 @@ public partial class UnitCharacterLayer : Node2D
             // 选中单位增加金色外环；移动时外环也跟随人物走完整条路径。
             DrawCircle(visualCenter + new Vector2(0, 11), 24.0f, new Color(1.0f, 0.84f, 0.25f), false, 2.5f);
         }
+    }
+
+    /// <summary>
+    /// 根据当前动画状态、朝向和时间选择一张真正的地图序列帧。
+    /// 行走帧优先跟随当前路径段进度，使移动速度改变后步伐仍与格子移动同步。
+    /// </summary>
+    private Texture2D? ResolveAnimationFrame(
+        UnitModel unit,
+        CharacterAnimationState state,
+        CharacterFacing facing)
+    {
+        int frameCount = CharacterAssetResolver.GetMapFrameCount(unit, state, facing);
+        if (frameCount <= 0)
+        {
+            return null;
+        }
+
+        int frameIndex;
+        if (state == CharacterAnimationState.Walk && _motions.TryGetValue(unit.Id, out UnitMotion? motion))
+        {
+            float pathPhase = motion.SegmentIndex + Mathf.Clamp(motion.Progress, 0.0f, 1.0f);
+            frameIndex = (int)MathF.Floor(pathPhase * WalkFramesPerSecond * SecondsPerTile) % frameCount;
+        }
+        else
+        {
+            frameIndex = (int)Math.Floor(_elapsed * IdleFramesPerSecond) % frameCount;
+        }
+
+        return CharacterAssetResolver.TryLoadMapFrame(unit, state, facing, frameIndex);
+    }
+
+    /// <summary>
+    /// 返回单位当前面朝方向。
+    /// 移动期间根据正在播放的路径段更新朝向；静止时保持最后一次方向。
+    /// </summary>
+    private CharacterFacing ResolveFacing(UnitModel unit)
+    {
+        if (_motions.TryGetValue(unit.Id, out UnitMotion? motion) && motion.Path.Count >= 2)
+        {
+            int segmentIndex = Mathf.Clamp(motion.SegmentIndex, 0, motion.Path.Count - 2);
+            Vector2I delta = motion.Path[segmentIndex + 1] - motion.Path[segmentIndex];
+            CharacterFacing facing = delta switch
+            {
+                { X: < 0 } => CharacterFacing.Left,
+                { X: > 0 } => CharacterFacing.Right,
+                { Y: < 0 } => CharacterFacing.Up,
+                _ => CharacterFacing.Down
+            };
+
+            _facings[unit.Id] = facing;
+            return facing;
+        }
+
+        return _facings.TryGetValue(unit.Id, out CharacterFacing cached)
+            ? cached
+            : CharacterFacing.Down;
     }
 
     /// <summary>
@@ -263,8 +354,8 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
-    /// 绘制正式地图人物纹理。
-    /// 统一把素材缩放到单格范围内，因此未来美术只需要保证透明背景和人物完整即可。
+    /// 绘制地图人物纹理。
+    /// 纹理使用最近邻过滤并缩放到单格范围，保持像素边缘清晰。
     /// </summary>
     private void DrawMapTexture(UnitModel unit, Texture2D texture, Vector2 center)
     {
@@ -308,8 +399,8 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
-    /// 根据人物当前地图状态计算动画偏移。
-    /// 行走时使用更快的上下步伐；静止时使用原有轻量呼吸动画。
+    /// 单张 map.png 或程序占位人物没有真正帧动画时使用的视觉补偿。
+    /// 真正序列帧存在时不会再额外上下晃动，避免出现“切帧同时漂浮”的重复动画。
     /// </summary>
     private Vector2 AnimationOffset(UnitModel unit)
     {
