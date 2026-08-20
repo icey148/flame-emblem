@@ -5,7 +5,7 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 把人物地图小人、人物详情、装备切换和战斗演出预览挂到现有 MainGame 场景上。
+/// 把人物地图小人、人物详情、装备切换、完整详情页和战斗演出预览挂到现有 MainGame 场景上。
 /// 当前主战斗场景尚未暴露只读 BattleView 接口，因此这个过渡层只在启动时通过反射缓存必要字段；后续重构主场景 API 后会移除反射。
 /// </summary>
 public partial class CharacterVisualCoordinator : Node
@@ -39,6 +39,12 @@ public partial class CharacterVisualCoordinator : Node
 
     /// <summary>循环切换当前人物备用装备的按钮。</summary>
     private Button? _cycleEquipmentButton;
+
+    /// <summary>打开完整人物详情页的按钮。</summary>
+    private Button? _openDetailsButton;
+
+    /// <summary>完整人物详情页。</summary>
+    private CharacterDetailOverlay? _characterDetailOverlay;
 
     /// <summary>锁定攻击目标时显示的独立战斗演出预览层。</summary>
     private BattleDuelPreviewControl? _duelPreview;
@@ -74,6 +80,7 @@ public partial class CharacterVisualCoordinator : Node
         CreateMapCharacterLayer();
         CreateBattleDuelPreview();
         CreateCharacterDetailsPanel();
+        CreateCharacterDetailOverlay();
     }
 
     /// <summary>
@@ -194,6 +201,32 @@ public partial class CharacterVisualCoordinator : Node
         };
         _cycleEquipmentButton.Pressed += OnCycleEquipmentPressed;
         actionColumn.AddChild(_cycleEquipmentButton);
+
+        _openDetailsButton = new Button
+        {
+            Text = "人物详情"
+        };
+        _openDetailsButton.Pressed += OnOpenDetailsPressed;
+        actionColumn.AddChild(_openDetailsButton);
+    }
+
+    /// <summary>
+    /// 创建覆盖在战场之上的完整人物详情页。
+    /// </summary>
+    private void CreateCharacterDetailOverlay()
+    {
+        CanvasLayer overlayLayer = new()
+        {
+            Layer = 30
+        };
+        AddChild(overlayLayer);
+
+        _characterDetailOverlay = new CharacterDetailOverlay
+        {
+            Position = new Vector2(210, 85),
+            Size = new Vector2(860, 540)
+        };
+        overlayLayer.AddChild(_characterDetailOverlay);
     }
 
     /// <summary>
@@ -254,6 +287,20 @@ public partial class CharacterVisualCoordinator : Node
     }
 
     /// <summary>
+    /// 打开当前选中人物的完整详情页。
+    /// </summary>
+    private void OnOpenDetailsPressed()
+    {
+        UnitModel? unit = ReadSelectedUnit();
+        if (unit is null)
+        {
+            return;
+        }
+
+        _characterDetailOverlay?.ShowUnit(unit);
+    }
+
+    /// <summary>
     /// 根据选中人物刷新头像、职业、装备、八维属性和操作按钮。
     /// </summary>
     private void RefreshDetailsPanel(UnitModel? unit, UnitModel? pendingTarget)
@@ -267,7 +314,8 @@ public partial class CharacterVisualCoordinator : Node
         _lastPanelState = state;
         _portrait?.SetUnit(unit);
 
-        if (_identityLabel is null || _statsLabel is null || _equipmentLabel is null || _cycleEquipmentButton is null)
+        if (_identityLabel is null || _statsLabel is null || _equipmentLabel is null ||
+            _cycleEquipmentButton is null || _openDetailsButton is null)
         {
             return;
         }
@@ -278,6 +326,7 @@ public partial class CharacterVisualCoordinator : Node
             _statsLabel.Text = "当前人物小人和头像支持正式 PNG 自动替换；没有素材时使用程序绘制占位模型。";
             _equipmentLabel.Text = "装备：选择我方人物后可以查看和切换备用装备。";
             _cycleEquipmentButton.Disabled = true;
+            _openDetailsButton.Disabled = true;
             return;
         }
 
@@ -299,6 +348,7 @@ public partial class CharacterVisualCoordinator : Node
         bool canCycle = unit.Team == UnitTeam.Player && available.Count > 1 && pendingTarget is null && !unit.HasActed;
         _cycleEquipmentButton.Disabled = !canCycle;
         _cycleEquipmentButton.Text = pendingTarget is not null ? "已锁定目标" : "切换装备";
+        _openDetailsButton.Disabled = false;
     }
 
     /// <summary>
