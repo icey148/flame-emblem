@@ -1,0 +1,81 @@
+{
+  "weapons": [
+    {
+      "id": "iron_sword",
+      "name": "铁剑",
+      "damage_type": "physical",
+      "might": 4,
+      "hit": 90,
+      "critical": 0,
+      "min_range": 1,
+      "max_range": 1,
+      "hp_cost": 0
+    },
+    {
+      "id": "short_bow",
+      "name": "短弓",
+      "damage_type": "physical",
+      "might": 4,
+      "hit": 85,
+      "critical": 5,
+      "min_range": 2,
+      "max_range": 2,
+      "hp_cost": 0
+    },
+    {
+      "id": "iron_spear",
+      "name": "铁枪",
+      "damage_type": "physical",
+      "might": 5,
+      "hit": 80,
+      "critical": 0,
+      "min_range": 1,
+      "max_range": 1,
+      "hp_cost": 0
+    },
+    {
+      "id": "ember",
+      "name": "火星术",
+      "damage_type": "magical",
+      "might": 5,
+      "hit": 88,
+      "critical": 5,
+      "min_range": 1,
+      "max_range": 2,
+      "hp_cost": 2
+    },
+    {
+      "id": "raider_axe",
+      "name": "粗斧",
+      "damage_type": "physical",
+      "might": 5,
+      "hit": 72,
+      "critical": 0,
+      "min_range": 1,
+      "max_range": 1,
+      "hp_cost": 0
+    },
+    {
+      "id": "guard_spear",
+      "name": "守备枪",
+      "damage_type": "physical",
+      "might": 4,
+      "hit": 82,
+      "critical": 0,
+      "min_range": 1,
+      "max_range": 1,
+      "hp_cost": 0
+    },
+    {
+      "id": "captain_blade",
+      "name": "队长长剑",
+      "damage_type": "physical",
+      "might": 6,
+      "hit": 88,
+      "critical": 8,
+      "min_range": 1,
+      "max_range": 1,
+      "hp_cost": 0
+    }
+  ]
+}
