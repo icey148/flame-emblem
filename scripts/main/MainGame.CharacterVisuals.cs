@@ -84,7 +84,7 @@ public partial class MainGame
         };
         row.AddChild(_characterPortrait);
 
-        VBoxContainer textColumn = new
+        VBoxContainer textColumn = new()
         {
             CustomMinimumSize = new Vector2(680, 68)
         };
@@ -151,21 +151,8 @@ public partial class MainGame
         }
 
         UnitModel unit = _selectedUnit;
-        return string.Join(
-            ':',
-            unit.Id,
-            unit.Level,
-            unit.Experience,
-            unit.CurrentHp,
-            unit.MaxHp,
-            unit.Strength,
-            unit.Magic,
-            unit.Skill,
-            unit.Speed,
-            unit.Luck,
-            unit.Defense,
-            unit.Resistance,
-            unit.EquippedWeapon.Id,
-            unit.HasActed);
+        return $"{unit.Id}:{unit.Level}:{unit.Experience}:{unit.CurrentHp}:{unit.MaxHp}:" +
+               $"{unit.Strength}:{unit.Magic}:{unit.Skill}:{unit.Speed}:{unit.Luck}:" +
+               $"{unit.Defense}:{unit.Resistance}:{unit.EquippedWeapon.Id}:{unit.HasActed}";
     }
 }
