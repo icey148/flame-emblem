@@ -4,8 +4,8 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 为当前原型中的角色选择程序绘制外观。
-/// 角色外观与战斗数据分离，后续接入正式美术素材时可以直接替换这一层。
+/// 为当前角色选择原创程序像素外观。
+/// 个人配色、身体轮廓和武器轮廓与战斗数据分离，后续接入正式原创素材时可以直接替换这一层。
 /// </summary>
 public static class CharacterAppearanceCatalog
 {
@@ -24,7 +24,8 @@ public static class CharacterAppearanceCatalog
                 new Color("d6b45a"),
                 new Color("e8b78f"),
                 true,
-                CharacterWeaponSilhouette.Sword);
+                CharacterWeaponSilhouette.Sword,
+                CharacterBodySilhouette.Light);
         }
 
         if (id == "celine")
@@ -35,7 +36,8 @@ public static class CharacterAppearanceCatalog
                 new Color("e4d08b"),
                 new Color("efc09b"),
                 false,
-                CharacterWeaponSilhouette.Bow);
+                CharacterWeaponSilhouette.Bow,
+                CharacterBodySilhouette.Light);
         }
 
         if (id == "rowan")
@@ -46,7 +48,8 @@ public static class CharacterAppearanceCatalog
                 new Color("a94f3f"),
                 new Color("d9a982"),
                 false,
-                CharacterWeaponSilhouette.Spear);
+                CharacterWeaponSilhouette.Spear,
+                CharacterBodySilhouette.Armored);
         }
 
         if (id == "mira")
@@ -57,10 +60,11 @@ public static class CharacterAppearanceCatalog
                 new Color("b96fd4"),
                 new Color("edbf9a"),
                 true,
-                CharacterWeaponSilhouette.Tome);
+                CharacterWeaponSilhouette.Tome,
+                CharacterBodySilhouette.Robed);
         }
 
-        // 通用敌军按职业给出不同轮廓，避免所有红军仍然看起来完全一样。
+        // 通用敌军按职业给出不同身体/武器轮廓，避免所有敌军只靠颜色区分。
         return unit.ClassDefinition.Id.ToLowerInvariant() switch
         {
             "guard" => new CharacterAppearanceDefinition(
@@ -69,21 +73,24 @@ public static class CharacterAppearanceCatalog
                 new Color("c1895b"),
                 new Color("d2a07d"),
                 false,
-                CharacterWeaponSilhouette.Spear),
+                CharacterWeaponSilhouette.Spear,
+                CharacterBodySilhouette.Armored),
             "captain" => new CharacterAppearanceDefinition(
                 new Color("2e2927"),
                 new Color("7c3131"),
                 new Color("d2aa55"),
                 new Color("d5a37f"),
                 true,
-                CharacterWeaponSilhouette.Sword),
+                CharacterWeaponSilhouette.Sword,
+                CharacterBodySilhouette.Armored),
             _ => new CharacterAppearanceDefinition(
                 new Color("5d4437"),
                 new Color("70423b"),
                 new Color("b66d4c"),
                 new Color("d3a17e"),
                 false,
-                CharacterWeaponSilhouette.Sword)
+                CharacterWeaponSilhouette.Sword,
+                CharacterBodySilhouette.Light)
         };
     }
 }
