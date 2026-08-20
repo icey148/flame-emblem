@@ -5,13 +5,15 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 把真实 CombatExchangeResult 按攻击顺序播放成独立复古战斗演出。
-/// 时间线完全由 Godot Timer 驱动，不依赖 _Process；玩家主动攻击优先立刻播放，
-/// 敌军攻击则先等待地图移动动画结束，保证视觉顺序不会被同步结算打乱。
+/// 时间线完全由 Godot Timer 驱动；玩家主动攻击优先播放，敌军攻击先等待地图移动动画结束。
 /// </summary>
 public partial class RetroBattleAnimationCoordinator : Node
 {
-    /// <summary>等待播放的战斗交换队列。</summary>
-    private readonly Queue<CombatExchangeResult> _queue = new();
+    /// <summary>
+    /// 等待播放的战斗交换及其表现快照。
+    /// EXP 必须在 BattleAnimationBus 事件触发瞬间记录，因为 MainGame 会在 ResolveExchange 返回以后才发放经验。
+    /// </summary>
+    private readonly Queue<QueuedBattlePresentation> _queue = new();
 
     /// <summary>地图人物表现协调器，用于等待敌军地图移动完成。</summary>
     private CharacterVisualCoordinator? _visualCoordinator;
@@ -25,14 +27,17 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>右侧战斗人物。</summary>
     private AnimatedBattleCharacterControl? _rightCharacter;
 
-    /// <summary>左侧人物名称与装备。</summary>
+    /// <summary>左侧人物顶部名称。</summary>
     private Label? _leftLabel;
 
-    /// <summary>右侧人物名称与装备。</summary>
+    /// <summary>右侧人物顶部名称。</summary>
     private Label? _rightLabel;
 
     /// <summary>中央逐击结果文本。</summary>
     private Label? _resultLabel;
+
+    /// <summary>双方 HP、伤害和玩家 EXP 的底部战斗 HUD。</summary>
+    private RetroBattleStatusHudControl? _statusHud;
 
     /// <summary>命中、闪避、必杀和魔法的程序特效层。</summary>
     private RetroBattleEffectControl? _effectControl;
@@ -46,8 +51,8 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>等待地图移动结束的轮询计时器。</summary>
     private Timer? _movementGateTimer;
 
-    /// <summary>当前正在播放的完整交换。</summary>
-    private CombatExchangeResult? _currentExchange;
+    /// <summary>当前正在播放的表现快照。</summary>
+    private QueuedBattlePresentation? _currentPresentation;
 
     /// <summary>当前交换左侧固定人物。</summary>
     private UnitModel? _leftUnit;
@@ -95,9 +100,8 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 收到真实战斗结果后入队。
-    /// 玩家主动攻击必须优先立刻打开演出，避免后续自动敌军回合抢先移动；
-    /// 敌军攻击则先经过地图移动 gate。
+    /// 收到真实战斗结果后保存表现所需快照并入队。
+    /// 这里发生在 MainGame 发放 EXP 之前，因此可以安全记录经验增长前的等级和经验值。
     /// </summary>
     private void OnExchangeResolved(CombatExchangeResult exchange)
     {
@@ -106,21 +110,34 @@ public partial class RetroBattleAnimationCoordinator : Node
             return;
         }
 
-        _queue.Enqueue(exchange);
+        UnitModel leftUnit = exchange.InitiatingAttacker;
+        UnitModel rightUnit = exchange.InitiatingDefender;
+        UnitModel? experienceUnit = exchange.Strikes
+            .Select(strike => strike.Attacker)
+            .FirstOrDefault(unit => unit.Team == UnitTeam.Player);
+
+        QueuedBattlePresentation presentation = new(
+            exchange,
+            leftUnit.MaxHp,
+            rightUnit.MaxHp,
+            experienceUnit,
+            experienceUnit?.Level ?? 0,
+            experienceUnit?.Experience ?? 0);
+
+        _queue.Enqueue(presentation);
         RequestStartForQueueHead();
     }
 
-    /// <summary>根据队首攻击方决定立即播放还是先等地图移动。</summary>
+    /// <summary>根据队首攻击方决定立即播放还是先等待地图移动。</summary>
     private void RequestStartForQueueHead()
     {
-        if (_currentExchange is not null || _queue.Count == 0)
+        if (_currentPresentation is not null || _queue.Count == 0)
         {
             return;
         }
 
-        CombatExchangeResult next = _queue.Peek();
-        bool playerInitiated = next.Strikes.Count > 0 &&
-                               next.Strikes[0].Attacker.Team == UnitTeam.Player;
+        QueuedBattlePresentation next = _queue.Peek();
+        bool playerInitiated = next.Exchange.InitiatingAttacker.Team == UnitTeam.Player;
         if (playerInitiated)
         {
             StartNextExchangeNow();
@@ -164,7 +181,7 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// </summary>
     private void RequestStartAfterMovement()
     {
-        if (_currentExchange is not null || _queue.Count == 0 || _movementGateTimer is null)
+        if (_currentPresentation is not null || _queue.Count == 0 || _movementGateTimer is null)
         {
             return;
         }
@@ -175,10 +192,10 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
     }
 
-    /// <summary>地图仍在移动时继续等；全部到达后才打开敌军横向战斗界面。</summary>
+    /// <summary>地图仍在移动时继续等待；全部到达后才打开敌军横向战斗界面。</summary>
     private void CheckMovementAndStartExchange()
     {
-        if (_currentExchange is not null || _queue.Count == 0)
+        if (_currentPresentation is not null || _queue.Count == 0)
         {
             return;
         }
@@ -195,12 +212,13 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>从队列取出下一场战斗并正式打开演出。</summary>
     private void StartNextExchangeNow()
     {
-        if (_currentExchange is not null || _queue.Count == 0)
+        if (_currentPresentation is not null || _queue.Count == 0)
         {
             return;
         }
 
-        CombatExchangeResult exchange = _queue.Dequeue();
+        QueuedBattlePresentation presentation = _queue.Dequeue();
+        CombatExchangeResult exchange = presentation.Exchange;
         if (exchange.Strikes.Count == 0)
         {
             RequestStartForQueueHead();
@@ -208,12 +226,12 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
 
         _movementGateTimer?.Stop();
-        _currentExchange = exchange;
+        _currentPresentation = presentation;
         _strikeIndex = 0;
-        _leftUnit = exchange.Strikes[0].Attacker;
-        _rightUnit = exchange.Strikes[0].Defender;
+        _leftUnit = exchange.InitiatingAttacker;
+        _rightUnit = exchange.InitiatingDefender;
 
-        // 先标记全局表现状态，再显示遮罩；地图移动层可以据此暂停后台动画。
+        // 先标记全局表现状态，再显示遮罩；地图移动层会据此暂停后台人物动画。
         BattleAnimationBus.BeginPlayback();
         _blocker?.Show();
         _leftCharacter?.SetUnit(_leftUnit);
@@ -224,12 +242,12 @@ public partial class RetroBattleAnimationCoordinator : Node
 
         if (_leftLabel is not null)
         {
-            _leftLabel.Text = $"{_leftUnit.DisplayName}\n{_leftUnit.EquippedWeapon.DisplayName}";
+            _leftLabel.Text = _leftUnit.DisplayName;
         }
 
         if (_rightLabel is not null)
         {
-            _rightLabel.Text = $"{_rightUnit.DisplayName}\n{_rightUnit.EquippedWeapon.DisplayName}";
+            _rightLabel.Text = _rightUnit.DisplayName;
         }
 
         if (_resultLabel is not null)
@@ -237,9 +255,20 @@ public partial class RetroBattleAnimationCoordinator : Node
             _resultLabel.Text = "战斗开始";
         }
 
+        _statusHud?.BeginBattle(
+            _leftUnit,
+            exchange.InitiatingAttackerHpBefore,
+            presentation.LeftMaxHpBefore,
+            _rightUnit,
+            exchange.InitiatingDefenderHpBefore,
+            presentation.RightMaxHpBefore,
+            presentation.ExperienceUnit,
+            presentation.ExperienceLevelBefore,
+            presentation.ExperienceBefore);
+
         double timeout = Math.Max(
             MinimumExchangeTimeoutSeconds,
-            exchange.Strikes.Count * MaximumSecondsPerStrike + 2.0);
+            exchange.Strikes.Count * MaximumSecondsPerStrike + 3.0);
         _watchdogTimer?.Start(timeout);
         SchedulePhase(PlaybackPhase.Intro, 0.28);
     }
@@ -254,7 +283,7 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>阶段 Timer 到点后推进一次状态。</summary>
     private void AdvancePlaybackPhase()
     {
-        if (_currentExchange is null)
+        if (_currentPresentation is null)
         {
             ResetCurrentExchangeState();
             RequestStartForQueueHead();
@@ -309,14 +338,16 @@ public partial class RetroBattleAnimationCoordinator : Node
 
         if (_resultLabel is not null)
         {
-            string costText = strike.HpCostPaid > 0 ? $" / 消耗 {strike.HpCostPaid} HP" : string.Empty;
-            _resultLabel.Text = $"{strike.Attacker.DisplayName} 使用 {strike.Attacker.EquippedWeapon.DisplayName}{costText}";
+            string costText = strike.HpCostPaid > 0 ? $"  HP -{strike.HpCostPaid}" : string.Empty;
+            _resultLabel.Text = $"{strike.Attacker.DisplayName}  {strike.Attacker.EquippedWeapon.DisplayName}{costText}";
         }
 
         SchedulePhase(PlaybackPhase.Windup, CurrentWindupDuration());
     }
 
-    /// <summary>显示命中、闪避、必杀或倒下结果。</summary>
+    /// <summary>
+    /// 显示命中、闪避、必杀或倒下结果，并在同一时刻推进底部 HP/伤害 HUD。
+    /// </summary>
     private void StartImpact()
     {
         CombatStrikeResult? strike = CurrentStrike();
@@ -329,6 +360,9 @@ public partial class RetroBattleAnimationCoordinator : Node
         AnimatedBattleCharacterControl? attackerControl = ControlFor(strike.Attacker);
         AnimatedBattleCharacterControl? defenderControl = ControlFor(strike.Defender);
         attackerControl?.Play(CharacterAnimationState.Idle);
+
+        // 血条在真正的命中时刻变化，法术 HP 成本和伤害都按真实逐击顺序重放。
+        _statusHud?.ApplyStrike(strike);
 
         if (!strike.Hit)
         {
@@ -356,7 +390,7 @@ public partial class RetroBattleAnimationCoordinator : Node
             }
         }
 
-        SchedulePhase(PlaybackPhase.Impact, 0.34);
+        SchedulePhase(PlaybackPhase.Impact, 0.42);
     }
 
     /// <summary>结果展示完成后恢复待机。</summary>
@@ -376,32 +410,37 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
 
         _effectControl?.Clear();
-        SchedulePhase(PlaybackPhase.Recovery, 0.20);
+        SchedulePhase(PlaybackPhase.Recovery, 0.22);
     }
 
-    /// <summary>进入下一次反击/追击，或进入整场收尾。</summary>
+    /// <summary>进入下一次反击/追击，或进入战后 EXP 展示。</summary>
     private void AdvanceStrikeOrFinish()
     {
-        if (_currentExchange is null)
+        if (_currentPresentation is null)
         {
             EmergencyFinishExchange("恢复阶段失去当前战斗交换");
             return;
         }
 
         _strikeIndex++;
-        if (_strikeIndex < _currentExchange.Strikes.Count)
+        if (_strikeIndex < _currentPresentation.Exchange.Strikes.Count)
         {
             StartCurrentStrike();
             return;
         }
 
         _effectControl?.Clear();
+        int gainedExperience = _statusHud?.ShowExperienceResult() ?? 0;
         if (_resultLabel is not null)
         {
-            _resultLabel.Text = "战斗结束";
+            _resultLabel.Text = gainedExperience > 0
+                ? $"获得 {gainedExperience} EXP"
+                : "战斗结束";
         }
 
-        SchedulePhase(PlaybackPhase.Outro, 0.42);
+        // 有玩家实际参与攻击时多停留一点时间，让 EXP 与升级信息可读。
+        double outroDuration = _currentPresentation.ExperienceUnit is null ? 0.55 : 1.15;
+        SchedulePhase(PlaybackPhase.Outro, outroDuration);
     }
 
     /// <summary>正常结束当前演出并准备队列下一场。</summary>
@@ -433,9 +472,10 @@ public partial class RetroBattleAnimationCoordinator : Node
         _watchdogTimer?.Stop();
         _blocker?.Hide();
         _effectControl?.Clear();
+        _statusHud?.ResetBattle();
         _leftCharacter?.Play(CharacterAnimationState.Idle);
         _rightCharacter?.Play(CharacterAnimationState.Idle);
-        _currentExchange = null;
+        _currentPresentation = null;
         _leftUnit = null;
         _rightUnit = null;
         _strikeIndex = 0;
@@ -468,14 +508,14 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>返回当前正在播放的攻击记录。</summary>
     private CombatStrikeResult? CurrentStrike()
     {
-        if (_currentExchange is null ||
+        if (_currentPresentation is null ||
             _strikeIndex < 0 ||
-            _strikeIndex >= _currentExchange.Strikes.Count)
+            _strikeIndex >= _currentPresentation.Exchange.Strikes.Count)
         {
             return null;
         }
 
-        return _currentExchange.Strikes[_strikeIndex];
+        return _currentPresentation.Exchange.Strikes[_strikeIndex];
     }
 
     /// <summary>魔法蓄力略长于物理攻击。</summary>
@@ -487,7 +527,7 @@ public partial class RetroBattleAnimationCoordinator : Node
             return 0.30;
         }
 
-        return strike.Attacker.EquippedWeapon.DamageType == DamageType.Magical ? 0.48 : 0.32;
+        return strike.Attacker.EquippedWeapon.DamageType == DamageType.Magical ? 0.50 : 0.34;
     }
 
     /// <summary>判断某人物是否固定站在左侧。</summary>
@@ -502,7 +542,10 @@ public partial class RetroBattleAnimationCoordinator : Node
         return IsLeftUnit(unit) ? _leftCharacter : _rightCharacter;
     }
 
-    /// <summary>创建全屏战斗演出 UI。</summary>
+    /// <summary>
+    /// 创建全屏战斗演出 UI。
+    /// 人物控件使用 420×408，使内部正式纹理区域恰好为 384×384：96px 素材为 4×，128px 素材为 3×，避免非整数拉伸造成模糊。
+    /// </summary>
     private void CreateBattleOverlay()
     {
         CanvasLayer layer = new()
@@ -524,7 +567,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         {
             Position = Vector2.Zero,
             Size = new Vector2(1280, 720),
-            Color = new Color(0.02f, 0.025f, 0.04f, 0.88f),
+            Color = new Color(0.018f, 0.022f, 0.032f, 0.94f),
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
         _blocker.AddChild(backdrop);
@@ -537,6 +580,21 @@ public partial class RetroBattleAnimationCoordinator : Node
         };
         _blocker.AddChild(battlePanel);
 
+        StyleBoxFlat panelStyle = new()
+        {
+            BgColor = new Color(0.055f, 0.065f, 0.08f, 1.0f),
+            BorderColor = new Color(0.48f, 0.37f, 0.22f, 1.0f),
+            BorderWidthLeft = 3,
+            BorderWidthTop = 3,
+            BorderWidthRight = 3,
+            BorderWidthBottom = 3,
+            CornerRadiusTopLeft = 0,
+            CornerRadiusTopRight = 0,
+            CornerRadiusBottomLeft = 0,
+            CornerRadiusBottomRight = 0
+        };
+        battlePanel.AddThemeStyleboxOverride("panel", panelStyle);
+
         Control stage = new()
         {
             CustomMinimumSize = new Vector2(1100, 560),
@@ -544,10 +602,11 @@ public partial class RetroBattleAnimationCoordinator : Node
         };
         battlePanel.AddChild(stage);
 
+        // 96×96 正式素材会落到 384×384 的整数 4 倍显示区，128×128 则正好是整数 3 倍。
         _leftCharacter = new AnimatedBattleCharacterControl
         {
-            Position = new Vector2(55, 95),
-            Size = new Vector2(390, 370),
+            Position = new Vector2(25, 48),
+            Size = new Vector2(420, 408),
             MirrorHorizontally = false,
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
@@ -555,68 +614,119 @@ public partial class RetroBattleAnimationCoordinator : Node
 
         _rightCharacter = new AnimatedBattleCharacterControl
         {
-            Position = new Vector2(655, 95),
-            Size = new Vector2(390, 370),
+            Position = new Vector2(655, 48),
+            Size = new Vector2(420, 408),
             MirrorHorizontally = true,
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
         stage.AddChild(_rightCharacter);
 
-        _leftLabel = new Label
-        {
-            Position = new Vector2(55, 28),
-            Size = new Vector2(390, 58),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        _leftLabel = CreateTopLabel(new Vector2(45, 10), new Vector2(360, 34), HorizontalAlignment.Left);
         stage.AddChild(_leftLabel);
 
-        _rightLabel = new Label
-        {
-            Position = new Vector2(655, 28),
-            Size = new Vector2(390, 58),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        _rightLabel = CreateTopLabel(new Vector2(695, 10), new Vector2(360, 34), HorizontalAlignment.Right);
         stage.AddChild(_rightLabel);
 
-        Label versus = new()
-        {
-            Text = "VS",
-            Position = new Vector2(500, 40),
-            Size = new Vector2(100, 45),
-            HorizontalAlignment = HorizontalAlignment.Center
-        };
+        Label versus = CreateTopLabel(new Vector2(500, 10), new Vector2(100, 34), HorizontalAlignment.Center);
+        versus.Text = "VS";
         stage.AddChild(versus);
 
         _resultLabel = new Label
         {
-            Position = new Vector2(360, 475),
-            Size = new Vector2(380, 65),
+            Position = new Vector2(360, 395),
+            Size = new Vector2(380, 36),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            AutowrapMode = TextServer.AutowrapMode.WordSmart
+            MouseFilter = Control.MouseFilterEnum.Ignore
         };
+        _resultLabel.AddThemeColorOverride("font_color", new Color(0.96f, 0.90f, 0.73f));
+        _resultLabel.AddThemeFontSizeOverride("font_size", 20);
         stage.AddChild(_resultLabel);
 
         _effectControl = new RetroBattleEffectControl
         {
             Position = Vector2.Zero,
-            Size = new Vector2(1100, 560),
+            Size = new Vector2(1100, 430),
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Visible = false
         };
         stage.AddChild(_effectControl);
 
+        _statusHud = new RetroBattleStatusHudControl
+        {
+            Position = new Vector2(35, 432),
+            Size = new Vector2(1030, 116),
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        stage.AddChild(_statusHud);
+
         Button skipButton = new()
         {
-            Text = "跳过全部演出",
-            Position = new Vector2(945, 510),
-            Size = new Vector2(140, 38),
+            Text = "跳过",
+            Position = new Vector2(995, 8),
+            Size = new Vector2(80, 34),
             MouseFilter = Control.MouseFilterEnum.Stop
         };
         skipButton.Pressed += SkipAllBattleAnimations;
         stage.AddChild(skipButton);
+    }
+
+    /// <summary>创建顶部人物名称标签。</summary>
+    private static Label CreateTopLabel(Vector2 position, Vector2 size, HorizontalAlignment alignment)
+    {
+        Label label = new()
+        {
+            Position = position,
+            Size = size,
+            HorizontalAlignment = alignment,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        label.AddThemeColorOverride("font_color", new Color(0.92f, 0.88f, 0.78f));
+        label.AddThemeFontSizeOverride("font_size", 19);
+        return label;
+    }
+
+    /// <summary>
+    /// 保存一场战斗在表现层开始播放前必须冻结的数值。
+    /// UnitModel 本体会在动画期间继续保留真实最终结算，因此 HP/EXP 的起点不能延迟读取。
+    /// </summary>
+    private sealed class QueuedBattlePresentation
+    {
+        /// <summary>创建表现快照。</summary>
+        public QueuedBattlePresentation(
+            CombatExchangeResult exchange,
+            int leftMaxHpBefore,
+            int rightMaxHpBefore,
+            UnitModel? experienceUnit,
+            int experienceLevelBefore,
+            int experienceBefore)
+        {
+            Exchange = exchange;
+            LeftMaxHpBefore = Math.Max(1, leftMaxHpBefore);
+            RightMaxHpBefore = Math.Max(1, rightMaxHpBefore);
+            ExperienceUnit = experienceUnit;
+            ExperienceLevelBefore = experienceLevelBefore;
+            ExperienceBefore = Math.Clamp(experienceBefore, 0, 99);
+        }
+
+        /// <summary>已经结算完成的真实战斗交换。</summary>
+        public CombatExchangeResult Exchange { get; }
+
+        /// <summary>左侧单位开战时最大 HP。</summary>
+        public int LeftMaxHpBefore { get; }
+
+        /// <summary>右侧单位开战时最大 HP。</summary>
+        public int RightMaxHpBefore { get; }
+
+        /// <summary>本场实际参与攻击、因此可能获得经验的玩家单位。</summary>
+        public UnitModel? ExperienceUnit { get; }
+
+        /// <summary>发放经验前等级。</summary>
+        public int ExperienceLevelBefore { get; }
+
+        /// <summary>发放经验前 EXP。</summary>
+        public int ExperienceBefore { get; }
     }
 
     /// <summary>战斗演出内部阶段。</summary>
