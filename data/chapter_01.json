@@ -3,6 +3,8 @@
   "title": "序章：残破石桥",
   "width": 15,
   "height": 10,
+  "victory_condition": "defeat_target",
+  "victory_target_id": "boss",
   "terrain": [
     {
       "type": "river",
