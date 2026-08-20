@@ -1,0 +1,35 @@
+# 自动检查 Godot C# 项目是否能够通过 .NET 编译。
+# 这个工作流不运行游戏画面，只负责尽早发现 C# 类型、语法和项目引用错误。
+name: Build C# project
+
+on:
+  push:
+    branches:
+      - main
+      - feature/playable-srpg-foundation
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 拉取当前提交，后续步骤直接在仓库根目录执行。
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 项目目标框架是 net8.0，因此 CI 固定安装 .NET 8 SDK 做基线验证。
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # 先单独恢复 NuGet 依赖，错误信息会比隐式恢复更清楚。
+      - name: Restore dependencies
+        run: dotnet restore FlameEmblem.csproj
+
+      # Release 构建用于检查整个 C# 项目是否可以编译。
+      - name: Build project
+        run: dotnet build FlameEmblem.csproj --configuration Release --no-restore
