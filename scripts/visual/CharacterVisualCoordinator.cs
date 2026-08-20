@@ -5,7 +5,7 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 把人物地图小人和人物详情面板挂到现有 MainGame 场景上。
+/// 把人物地图小人、人物详情、装备切换和战斗演出预览挂到现有 MainGame 场景上。
 /// 当前主战斗场景尚未暴露只读 BattleView 接口，因此这个过渡层只在启动时通过反射缓存必要字段；后续重构主场景 API 后会移除反射。
 /// </summary>
 public partial class CharacterVisualCoordinator : Node
@@ -19,7 +19,10 @@ public partial class CharacterVisualCoordinator : Node
     /// <summary>MainGame 中当前选中单位字段的缓存反射信息。</summary>
     private FieldInfo? _selectedUnitField;
 
-    /// <summary>地图上的程序化人物小人层。</summary>
+    /// <summary>MainGame 中当前锁定攻击目标字段的缓存反射信息。</summary>
+    private FieldInfo? _pendingAttackTargetField;
+
+    /// <summary>地图上的人物小人层。</summary>
     private UnitCharacterLayer? _unitCharacterLayer;
 
     /// <summary>人物详情头像控件。</summary>
@@ -30,6 +33,15 @@ public partial class CharacterVisualCoordinator : Node
 
     /// <summary>人物详情八维属性文本。</summary>
     private Label? _statsLabel;
+
+    /// <summary>装备切换提示文本。</summary>
+    private Label? _equipmentLabel;
+
+    /// <summary>循环切换当前人物备用装备的按钮。</summary>
+    private Button? _cycleEquipmentButton;
+
+    /// <summary>锁定攻击目标时显示的独立战斗演出预览层。</summary>
+    private BattleDuelPreviewControl? _duelPreview;
 
     /// <summary>上一次面板状态签名，用于避免无意义地每帧刷新文字。</summary>
     private string _lastPanelState = string.Empty;
@@ -50,8 +62,9 @@ public partial class CharacterVisualCoordinator : Node
         Type hostType = _battleHost.GetType();
         _unitsField = hostType.GetField("_units", BindingFlags.Instance | BindingFlags.NonPublic);
         _selectedUnitField = hostType.GetField("_selectedUnit", BindingFlags.Instance | BindingFlags.NonPublic);
+        _pendingAttackTargetField = hostType.GetField("_pendingAttackTarget", BindingFlags.Instance | BindingFlags.NonPublic);
 
-        if (_unitsField is null || _selectedUnitField is null)
+        if (_unitsField is null || _selectedUnitField is null || _pendingAttackTargetField is null)
         {
             GD.PushWarning("CharacterVisualCoordinator 无法读取 MainGame 的人物状态字段。请在重构 MainGame 时同步更新人物表现接口。");
             SetProcess(false);
@@ -59,6 +72,7 @@ public partial class CharacterVisualCoordinator : Node
         }
 
         CreateMapCharacterLayer();
+        CreateBattleDuelPreview();
         CreateCharacterDetailsPanel();
     }
 
@@ -70,19 +84,20 @@ public partial class CharacterVisualCoordinator : Node
     {
         IReadOnlyList<UnitModel> units = ReadUnits();
         UnitModel? selectedUnit = ReadSelectedUnit();
+        UnitModel? pendingTarget = ReadPendingAttackTarget();
 
         if (_unitCharacterLayer is not null)
         {
             _unitCharacterLayer.Units = units;
             _unitCharacterLayer.SelectedUnit = selectedUnit;
-            _unitCharacterLayer.QueueRedraw();
         }
 
-        RefreshDetailsPanel(selectedUnit);
+        _duelPreview?.SetCombatants(selectedUnit, pendingTarget);
+        RefreshDetailsPanel(selectedUnit, pendingTarget);
     }
 
     /// <summary>
-    /// 创建覆盖在原型单位圆点之上的程序化 2D 人物层。
+    /// 创建覆盖在原型单位圆点之上的 2D 人物层。
     /// </summary>
     private void CreateMapCharacterLayer()
     {
@@ -96,7 +111,26 @@ public partial class CharacterVisualCoordinator : Node
     }
 
     /// <summary>
-    /// 创建地图底部的人物头像与属性详情面板。
+    /// 创建锁定攻击目标时出现的左右战斗演出层。
+    /// </summary>
+    private void CreateBattleDuelPreview()
+    {
+        CanvasLayer battleLayer = new()
+        {
+            Layer = 10
+        };
+        AddChild(battleLayer);
+
+        _duelPreview = new BattleDuelPreviewControl
+        {
+            Position = new Vector2(105, 335),
+            Size = new Vector2(650, 245)
+        };
+        battleLayer.AddChild(_duelPreview);
+    }
+
+    /// <summary>
+    /// 创建地图底部的人物头像、属性和装备操作面板。
     /// </summary>
     private void CreateCharacterDetailsPanel()
     {
@@ -108,8 +142,8 @@ public partial class CharacterVisualCoordinator : Node
 
         PanelContainer panel = new()
         {
-            Position = new Vector2(40, 625),
-            Size = new Vector2(780, 72)
+            Position = new Vector2(40, 585),
+            Size = new Vector2(780, 110)
         };
         detailsLayer.AddChild(panel);
 
@@ -118,13 +152,13 @@ public partial class CharacterVisualCoordinator : Node
 
         _portrait = new CharacterPortraitControl
         {
-            CustomMinimumSize = new Vector2(82, 68)
+            CustomMinimumSize = new Vector2(105, 100)
         };
         row.AddChild(_portrait);
 
         VBoxContainer textColumn = new()
         {
-            CustomMinimumSize = new Vector2(680, 68)
+            CustomMinimumSize = new Vector2(500, 100)
         };
         row.AddChild(textColumn);
 
@@ -137,9 +171,29 @@ public partial class CharacterVisualCoordinator : Node
         _statsLabel = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            Text = "当前人物小人和头像为程序绘制占位模型，后续可直接替换正式 2D 美术。"
+            Text = "当前人物小人和头像支持正式 PNG 自动替换；没有素材时使用程序绘制占位模型。"
         };
         textColumn.AddChild(_statsLabel);
+
+        _equipmentLabel = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart
+        };
+        textColumn.AddChild(_equipmentLabel);
+
+        VBoxContainer actionColumn = new()
+        {
+            CustomMinimumSize = new Vector2(145, 100),
+            Alignment = BoxContainer.AlignmentMode.Center
+        };
+        row.AddChild(actionColumn);
+
+        _cycleEquipmentButton = new Button
+        {
+            Text = "切换装备"
+        };
+        _cycleEquipmentButton.Pressed += OnCycleEquipmentPressed;
+        actionColumn.AddChild(_cycleEquipmentButton);
     }
 
     /// <summary>
@@ -167,11 +221,44 @@ public partial class CharacterVisualCoordinator : Node
     }
 
     /// <summary>
-    /// 根据选中人物刷新头像、职业、装备和八维属性。
+    /// 读取当前战斗预测锁定的敌军目标。
     /// </summary>
-    private void RefreshDetailsPanel(UnitModel? unit)
+    private UnitModel? ReadPendingAttackTarget()
     {
-        string state = BuildPanelState(unit);
+        return _battleHost is null || _pendingAttackTargetField is null
+            ? null
+            : _pendingAttackTargetField.GetValue(_battleHost) as UnitModel;
+    }
+
+    /// <summary>
+    /// 循环切换当前玩家单位的备用装备。
+    /// 已经锁定攻击目标时禁止切换，保证主 HUD 的预测数值不会与实际装备产生短暂不一致。
+    /// </summary>
+    private void OnCycleEquipmentPressed()
+    {
+        UnitModel? unit = ReadSelectedUnit();
+        UnitModel? pendingTarget = ReadPendingAttackTarget();
+        if (unit is null || unit.Team != UnitTeam.Player || pendingTarget is not null)
+        {
+            return;
+        }
+
+        UnitLoadoutCatalog.CycleNext(unit);
+        _lastPanelState = string.Empty;
+
+        // 装备射程变化会影响地图攻击范围，因此要求主 Canvas 重新绘制。
+        if (_battleHost is CanvasItem canvasItem)
+        {
+            canvasItem.QueueRedraw();
+        }
+    }
+
+    /// <summary>
+    /// 根据选中人物刷新头像、职业、装备、八维属性和操作按钮。
+    /// </summary>
+    private void RefreshDetailsPanel(UnitModel? unit, UnitModel? pendingTarget)
+    {
+        string state = BuildPanelState(unit, pendingTarget);
         if (state == _lastPanelState)
         {
             return;
@@ -180,7 +267,7 @@ public partial class CharacterVisualCoordinator : Node
         _lastPanelState = state;
         _portrait?.SetUnit(unit);
 
-        if (_identityLabel is null || _statsLabel is null)
+        if (_identityLabel is null || _statsLabel is null || _equipmentLabel is null || _cycleEquipmentButton is null)
         {
             return;
         }
@@ -188,23 +275,36 @@ public partial class CharacterVisualCoordinator : Node
         if (unit is null)
         {
             _identityLabel.Text = "人物详情：选择一个单位查看。";
-            _statsLabel.Text = "当前人物小人和头像为程序绘制占位模型，后续可直接替换正式 2D 美术。";
+            _statsLabel.Text = "当前人物小人和头像支持正式 PNG 自动替换；没有素材时使用程序绘制占位模型。";
+            _equipmentLabel.Text = "装备：选择我方人物后可以查看和切换备用装备。";
+            _cycleEquipmentButton.Disabled = true;
             return;
         }
 
         WeaponDefinition equipped = unit.EquippedWeapon;
-        string damageType = equipped.DamageType == WeaponDamageType.Magical ? "魔法" : "物理";
+        string damageType = equipped.DamageType == DamageType.Magical ? "魔法" : "物理";
         _identityLabel.Text =
             $"{unit.DisplayName}  |  Lv.{unit.Level} {unit.ClassDefinition.DisplayName}  |  {equipped.DisplayName}（{damageType}）";
         _statsLabel.Text =
             $"HP {unit.CurrentHp}/{unit.MaxHp}  力 {unit.Strength}  魔 {unit.Magic}  技 {unit.Skill}  速 {unit.Speed}  " +
             $"运 {unit.Luck}  防 {unit.Defense}  魔防 {unit.Resistance}  EXP {unit.Experience}/100";
+
+        IReadOnlyList<WeaponDefinition> available = UnitLoadoutCatalog.GetAvailableWeapons(unit);
+        string equipmentNames = string.Join(" / ", available.Select(weapon => weapon.DisplayName));
+        _equipmentLabel.Text =
+            $"装备：{equipmentNames}  |  当前射程 {equipped.MinRange}-{equipped.MaxRange}  " +
+            $"威力 {equipped.Might} 命中 {equipped.Hit} 必杀 {equipped.Critical}" +
+            (equipped.HpCost > 0 ? $" HP消耗 {equipped.HpCost}" : string.Empty);
+
+        bool canCycle = unit.Team == UnitTeam.Player && available.Count > 1 && pendingTarget is null && !unit.HasActed;
+        _cycleEquipmentButton.Disabled = !canCycle;
+        _cycleEquipmentButton.Text = pendingTarget is not null ? "已锁定目标" : "切换装备";
     }
 
     /// <summary>
     /// 生成人物详情面板的状态签名，只在可见数据变化时更新 Label。
     /// </summary>
-    private static string BuildPanelState(UnitModel? unit)
+    private static string BuildPanelState(UnitModel? unit, UnitModel? pendingTarget)
     {
         if (unit is null)
         {
@@ -213,6 +313,7 @@ public partial class CharacterVisualCoordinator : Node
 
         return $"{unit.Id}:{unit.Level}:{unit.Experience}:{unit.CurrentHp}:{unit.MaxHp}:" +
                $"{unit.Strength}:{unit.Magic}:{unit.Skill}:{unit.Speed}:{unit.Luck}:" +
-               $"{unit.Defense}:{unit.Resistance}:{unit.EquippedWeapon.Id}:{unit.HasActed}";
+               $"{unit.Defense}:{unit.Resistance}:{unit.EquippedWeapon.Id}:{unit.HasActed}:" +
+               $"{pendingTarget?.Id ?? "no-target"}";
     }
 }
