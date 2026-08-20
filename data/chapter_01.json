@@ -1,0 +1,35 @@
+{
+  "id": "chapter_01",
+  "title": "序章：残破石桥",
+  "width": 15,
+  "height": 10,
+  "terrain": [
+    {
+      "type": "river",
+      "cells": [[7,0],[7,1],[7,2],[7,3],[7,6],[7,7],[7,8],[7,9]]
+    },
+    {
+      "type": "bridge",
+      "cells": [[7,4],[7,5]]
+    },
+    {
+      "type": "forest",
+      "cells": [[4,1],[5,1],[4,2],[3,7],[4,7],[10,1],[10,2],[11,1],[9,7],[10,7]]
+    },
+    {
+      "type": "fort",
+      "cells": [[13,4]]
+    }
+  ],
+  "units": [
+    { "unit_id": "adrian", "instance_id": "adrian", "team": "player", "x": 2, "y": 3 },
+    { "unit_id": "celine", "instance_id": "celine", "team": "player", "x": 2, "y": 5 },
+    { "unit_id": "rowan", "instance_id": "rowan", "team": "player", "x": 3, "y": 4 },
+    { "unit_id": "mira", "instance_id": "mira", "team": "player", "x": 1, "y": 4 },
+    { "unit_id": "raider", "instance_id": "enemy_01", "team": "enemy", "x": 11, "y": 2 },
+    { "unit_id": "raider", "instance_id": "enemy_02", "team": "enemy", "x": 12, "y": 4 },
+    { "unit_id": "raider", "instance_id": "enemy_03", "team": "enemy", "x": 11, "y": 6 },
+    { "unit_id": "guard", "instance_id": "enemy_04", "team": "enemy", "x": 13, "y": 7 },
+    { "unit_id": "bridge_captain", "instance_id": "boss", "team": "enemy", "x": 13, "y": 4 }
+  ]
+}
