@@ -1,20 +1,21 @@
 # Flame Emblem
 
-个人用原创 2D 战术 RPG 项目，玩法方向参考经典格子制 SRPG，但角色、剧情、地图、UI、音频和美术素材保持原创。
+个人用原创复古像素 2D 战术 RPG 项目。玩法、节奏和表现结构参考经典格子制 SRPG，但角色、剧情、地图、UI、文本、音频和美术素材保持原创，不直接复制既有游戏资源。
 
 ## 当前技术基线
 
 - Engine: Godot 4.7.1 .NET edition
 - Language: C# / .NET 8
 - Runtime: 纯本地单机
+- Visual direction: 复古像素 SRPG，最近邻缩放，地图小人 + 独立横向战斗演出
 - Enemy behavior: 固定规则 / 确定性目标选择与移动逻辑，不接入 LLM、生成式 AI 或联网 AI 服务
-- Prototype rendering: 当前地图、单位和范围高亮均由代码绘制，不依赖外部商业素材
+- Art fallback: 正式原创 PNG 尚未完成时，使用代码绘制的原创像素职业模板，不再使用圆形几何人偶
 
 ## 当前可玩内容
 
 开发分支：`feature/playable-srpg-foundation`
 
-目前已经实现第三阶段战斗骨架：
+当前已经实现：
 
 - JSON 数据驱动的 15×10 序章地图
 - 4 名我方单位和 5 名敌军单位
@@ -23,7 +24,8 @@
 - 带地形移动消耗的最短路寻路
 - 河流不可进入、森林移动消耗 2、据点提供防御/回避
 - 单位阻挡
-- 移动后锁定当前位置，避免重复免费移动
+- 人物沿合法路径逐格移动，不再直接瞬移
+- 移动结束后显示明确的攻击 / 等待行动菜单
 - 独立武器 / 法术数据表
 - 武器属性：威力、命中、必杀、最小/最大射程、伤害类型、HP 消耗
 - 物理伤害：力量对防御，并受到地形防御修正
@@ -42,11 +44,74 @@
 - 成长属性：HP / 力量 / 魔力 / 技巧 / 速度 / 幸运 / 防御 / 魔防
 - 成长判定使用稳定哈希，避免反复重开刷同一级成长
 - 单位 HP、等级、职业、装备、EXP 与生命条 HUD
+- 装备切换与人物详情面板
 - 等待 / 手动结束玩家回合
 - 玩家全部行动后自动切换敌军回合
 - 敌军按固定规则寻找最近玩家、按地形移动并攻击
 - 数据驱动胜利条件：当前序章击败 `boss` 即胜利
 - 我方全灭失败
+
+## 复古像素人物系统
+
+当前人物表现已经从“圆形/几何占位人偶”切换为原创像素职业模板。
+
+没有正式素材时，游戏会直接绘制：
+
+- 地图 32×32 风格人物轮廓
+- 两步行走循环与四方向朝向
+- 剑 / 枪 / 弓 / 法书不同装备轮廓
+- 轻装 / 重甲 / 长袍身体模板数据
+- 复古有限色块人物头像
+- 侧视战斗人物
+- 攻击、施法、受击、闪避、必杀和倒下的程序动画回退
+
+加入正式原创素材后，程序会优先加载 PNG 序列帧。
+
+推荐美术规格：
+
+- 地图人物：32×32 像素逻辑画布
+- 地图显示：最近邻整数/近整数放大
+- 人物头像：64×64 或 96×96 像素
+- 战斗人物：96×96 或 128×128 像素逻辑画布
+- 所有 PNG 建议透明背景
+- 不使用平滑过滤，保持像素边缘
+
+地图序列帧示例：
+
+```text
+assets/characters/adrian/map/
+├── idle_down_0.png
+├── idle_down_1.png
+├── walk_down_0.png
+├── walk_down_1.png
+├── walk_down_2.png
+├── walk_left_0.png
+├── walk_right_0.png
+└── walk_up_0.png
+```
+
+战斗序列帧示例：
+
+```text
+assets/characters/adrian/battle/
+├── idle_0.png
+├── idle_1.png
+├── attack_0.png
+├── attack_1.png
+├── hit_0.png
+├── dodge_0.png
+└── defeat_0.png
+```
+
+法师还可以提供：
+
+```text
+cast_0.png
+cast_1.png
+cast_2.png
+```
+
+正式素材缺失时会自然回退到程序像素模板，因此可以边开发玩法边逐步替换美术。
 
 ## 运行方式
 
@@ -65,13 +130,15 @@ git pull
 
 ## 操作方式
 
-- 鼠标左键点击蓝色单位：选中。
+- 鼠标左键点击我方单位：选中。
 - 蓝色区域：当前单位根据移动力与地形消耗计算出的可移动范围。
 - 森林需要消耗 2 点移动力，河流不可进入。
-- 移动后点击攻击范围内的红色敌军：锁定目标并显示完整战斗预测。
-- `确认攻击`：实际掷命中/必杀并执行可能的反击和追击。
+- 点击可移动格后，人物沿路径逐格移动到目标位置。
+- 移动完成后出现行动菜单：有目标时可以攻击，也可以等待。
+- 点击攻击范围内敌军：锁定目标并显示完整战斗预测。
+- `确认攻击`：实际掷命中/必杀并执行可能的反击和追击，同时把真实结算发送给战斗动画状态机。
 - `取消攻击目标`：保留当前单位位置，重新选择攻击目标。
-- `等待（结束当前单位行动）`：结束当前单位行动。
+- `等待`：结束当前单位行动。
 - `结束玩家回合`：让尚未行动的单位放弃本回合并进入敌军回合。
 
 ## 数据文件
@@ -81,26 +148,8 @@ git pull
 - `data/classes.json`：职业 ID、显示名称、移动力和职业层预留射程。
 - `data/weapons.json`：武器/法术 ID、伤害类型、威力、命中、必杀、射程和 HP 消耗。
 - `data/units.json`：角色模板、职业/装备引用、等级、八项基础属性和成长率。
+- `data/loadouts.json`：玩家单位可切换的武器/法术。
 - `data/chapter_01.json`：地图尺寸、胜利条件、地形坐标和单位部署。
-
-`weapons.json` 主要字段：
-
-- `damage_type`：`physical` / `magical`
-- `might`：威力
-- `hit`：基础命中
-- `critical`：基础必杀
-- `min_range` / `max_range`：攻击射程
-- `hp_cost`：每次实际使用需要支付的 HP，普通武器填 0
-
-`chapter_01.json` 当前使用：
-
-- `victory_condition: "defeat_target"`
-- `victory_target_id: "boss"`
-- `terrain[].type`：`plain` / `forest` / `bridge` / `river` / `fort`
-- `terrain[].cells`：二维坐标数组，每项格式 `[x, y]`
-- `units[].unit_id`：引用 `units.json` 中的角色模板
-- `units[].instance_id`：当前章节中的唯一实例 ID
-- `units[].team`：`player` 或 `enemy`
 
 ## 代码注释规范
 
@@ -112,35 +161,43 @@ git pull
 - 不写“为了有注释而注释”的废话，注释重点解释为什么这样做、规则是什么、未来扩展点在哪里。
 - `project.godot`、`.tscn` 等配置文件在格式允许的地方写注释；JSON 不强行加入非法注释，字段含义统一写进文档。
 
-## 当前目录
+## 当前主要目录
 
 ```text
 flame-emblem/
+├── assets/
+│   └── characters/
 ├── data/
 │   ├── chapter_01.json
 │   ├── classes.json
+│   ├── loadouts.json
 │   ├── units.json
 │   └── weapons.json
-├── project.godot
-├── FlameEmblem.csproj
 ├── scenes/
 │   └── main/
 │       └── Main.tscn
-└── scripts/
-    ├── game/
-    │   ├── BattlePresentationFormatter.cs
-    │   ├── ChapterDataLoader.cs
-    │   ├── CombatResolver.cs
-    │   ├── CombatRules.cs
-    │   ├── EnemyTurnController.cs
-    │   ├── TerrainRules.cs
-    │   ├── UnitClassDefinition.cs
-    │   ├── UnitModel.cs
-    │   └── WeaponDefinition.cs
-    └── main/
-        └── MainGame.cs
+├── scripts/
+│   ├── game/
+│   ├── main/
+│   └── visual/
+├── project.godot
+└── FlameEmblem.csproj
 ```
+
+## 美术与还原边界
+
+本项目可以高还原经典复古 SRPG 的玩法节奏、界面信息结构、地图单位动画方式、横向战斗演出方式、职业/转职/魔法等系统体验。
+
+角色造型、像素帧、地图、UI 图形、文本、音乐和其他具体美术资源保持原创，不逐像素复制既有商业游戏素材。
 
 ## 下一阶段
 
-下一阶段优先加入：真正独立的战斗演出场景、单位详情面板、转职基础、武器背包/切换、剧情对话、世界地图节点和存档。
+下一阶段优先加入：
+
+- 轻装 / 重甲 / 长袍身体模板在地图与战斗层的进一步差异化
+- 真正原创的第一批多帧人物 PNG
+- 武器攻击轨迹与更多魔法效果
+- 转职基础
+- 剧情对话
+- 世界地图节点
+- 存档
