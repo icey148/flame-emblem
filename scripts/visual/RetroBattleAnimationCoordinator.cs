@@ -6,6 +6,7 @@ namespace FlameEmblem.Visual;
 /// <summary>
 /// 把真实 CombatExchangeResult 按攻击顺序播放成独立复古战斗演出。
 /// 主动攻击、反击、追击、命中、闪避、必杀、魔法和击倒均直接读取已经结算好的结果，不重新计算概率。
+/// 演出层带有超时、异常隔离和手动跳过保护，任何表现层错误都不能永久锁住战棋地图输入。
 /// </summary>
 public partial class RetroBattleAnimationCoordinator : Node
 {
@@ -51,6 +52,18 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>当前阶段已经持续的秒数。</summary>
     private float _phaseElapsed;
 
+    /// <summary>当前整场战斗已经播放的秒数，用于最终安全超时。</summary>
+    private float _exchangeElapsed;
+
+    /// <summary>单个演出阶段允许停留的最大时间；正常阶段全部远短于该值。</summary>
+    private const float MaximumPhaseSeconds = 2.0f;
+
+    /// <summary>每一击额外允许的总演出时间，用于计算整场战斗的动态上限。</summary>
+    private const float MaximumSecondsPerStrike = 2.2f;
+
+    /// <summary>没有攻击数量可参考时仍至少允许的整场演出时间。</summary>
+    private const float MinimumExchangeTimeoutSeconds = 6.0f;
+
     /// <summary>
     /// 进入场景树时订阅战斗结算事件。
     /// </summary>
@@ -60,50 +73,88 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 离开场景树时解除静态事件订阅，避免重新运行场景后保留旧节点引用。
+    /// 离开场景树时解除静态事件订阅并确保输入拦截层被隐藏。
     /// </summary>
     public override void _ExitTree()
     {
         BattleAnimationBus.ExchangeResolved -= OnExchangeResolved;
+        _blocker?.Hide();
     }
 
     /// <summary>
-    /// 创建独立战斗演出 UI。
+    /// 创建独立战斗演出 UI，并强制本协调器在场景暂停时也继续推进。
+    /// 这样以后即使加入暂停菜单或剧情暂停，也不会出现战斗遮罩永久停住的情况。
     /// </summary>
     public override void _Ready()
     {
+        ProcessMode = ProcessModeEnum.Always;
+        SetProcess(true);
         CreateBattleOverlay();
     }
 
     /// <summary>
     /// 按阶段推进当前战斗动画。
+    /// 所有演出状态切换都放在异常保护中，表现层错误只会终止动画，不会影响已经完成的战斗结算。
     /// </summary>
     public override void _Process(double delta)
     {
-        if (_currentExchange is null)
+        try
         {
-            TryStartNextExchange();
-            return;
-        }
+            if (_currentExchange is null)
+            {
+                TryStartNextExchange();
+                return;
+            }
 
-        _phaseElapsed += (float)delta;
-        switch (_phase)
+            float frameDelta = Math.Max(0.0f, (float)delta);
+            _phaseElapsed += frameDelta;
+            _exchangeElapsed += frameDelta;
+
+            // 正常一击不到 1.2 秒；动态总上限只是最后保险，不参与正常节奏。
+            float exchangeTimeout = Math.Max(
+                MinimumExchangeTimeoutSeconds,
+                _currentExchange.Strikes.Count * MaximumSecondsPerStrike + 2.0f);
+            if (_exchangeElapsed >= exchangeTimeout)
+            {
+                EmergencyFinishExchange($"战斗演出超过 {exchangeTimeout:0.0} 秒安全上限");
+                return;
+            }
+
+            // 任一阶段单独停留超过两秒也视为状态机异常，避免总超时前长时间黑屏。
+            if (_phase != PlaybackPhase.Hidden && _phaseElapsed >= MaximumPhaseSeconds)
+            {
+                EmergencyFinishExchange($"战斗演出阶段 {_phase} 未能按时推进");
+                return;
+            }
+
+            switch (_phase)
+            {
+                case PlaybackPhase.Intro when _phaseElapsed >= 0.28f:
+                    StartCurrentStrike();
+                    break;
+                case PlaybackPhase.Windup when _phaseElapsed >= CurrentWindupDuration():
+                    StartImpact();
+                    break;
+                case PlaybackPhase.Impact when _phaseElapsed >= 0.34f:
+                    StartRecovery();
+                    break;
+                case PlaybackPhase.Recovery when _phaseElapsed >= 0.20f:
+                    AdvanceStrikeOrFinish();
+                    break;
+                case PlaybackPhase.Outro when _phaseElapsed >= 0.42f:
+                    FinishExchange();
+                    break;
+                case PlaybackPhase.Hidden:
+                    // 有交换却进入 Hidden 说明内部状态不一致，直接释放遮罩比永久卡住更安全。
+                    EmergencyFinishExchange("存在战斗交换但演出阶段意外进入 Hidden");
+                    break;
+            }
+        }
+        catch (Exception exception)
         {
-            case PlaybackPhase.Intro when _phaseElapsed >= 0.28f:
-                StartCurrentStrike();
-                break;
-            case PlaybackPhase.Windup when _phaseElapsed >= CurrentWindupDuration():
-                StartImpact();
-                break;
-            case PlaybackPhase.Impact when _phaseElapsed >= 0.34f:
-                StartRecovery();
-                break;
-            case PlaybackPhase.Recovery when _phaseElapsed >= 0.20f:
-                AdvanceStrikeOrFinish();
-                break;
-            case PlaybackPhase.Outro when _phaseElapsed >= 0.42f:
-                FinishExchange();
-                break;
+            // 战斗数值已经在 CombatResolver 中结算完成，因此这里出现表现异常时只需要释放 UI。
+            GD.PushError($"Battle animation failed and was safely aborted: {exception}");
+            EmergencyFinishExchange("战斗演出发生运行时异常");
         }
     }
 
@@ -123,7 +174,7 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 创建全屏输入拦截、暗色背景、左右人物位和中央特效层。
+    /// 创建全屏输入拦截、暗色背景、左右人物位、中央特效层和紧急跳过按钮。
     /// </summary>
     private void CreateBattleOverlay()
     {
@@ -229,6 +280,16 @@ public partial class RetroBattleAnimationCoordinator : Node
             Visible = false
         };
         stage.AddChild(_effectControl);
+
+        Button skipButton = new()
+        {
+            Text = "跳过全部演出",
+            Position = new Vector2(945, 510),
+            Size = new Vector2(140, 38),
+            MouseFilter = Control.MouseFilterEnum.Stop
+        };
+        skipButton.Pressed += SkipAllBattleAnimations;
+        stage.AddChild(skipButton);
     }
 
     /// <summary>
@@ -253,6 +314,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         _rightUnit = exchange.Strikes[0].Defender;
         _phase = PlaybackPhase.Intro;
         _phaseElapsed = 0.0f;
+        _exchangeElapsed = 0.0f;
 
         _blocker?.Show();
         _leftCharacter?.SetUnit(_leftUnit);
@@ -414,15 +476,47 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// </summary>
     private void FinishExchange()
     {
+        ResetCurrentExchangeState();
+        TryStartNextExchange();
+    }
+
+    /// <summary>
+    /// 手动跳过当前以及排队中的全部演出。
+    /// 战斗数值在进入演出前已经结算完成，所以跳过只影响视觉，不会改变游戏结果。
+    /// </summary>
+    private void SkipAllBattleAnimations()
+    {
+        _queue.Clear();
+        ResetCurrentExchangeState();
+    }
+
+    /// <summary>
+    /// 异常或超时时安全结束演出，并清空后续队列，防止相同表现错误连续锁住玩家。
+    /// </summary>
+    private void EmergencyFinishExchange(string reason)
+    {
+        GD.PushWarning($"Battle animation aborted safely: {reason}");
+        _queue.Clear();
+        ResetCurrentExchangeState();
+    }
+
+    /// <summary>
+    /// 统一释放当前演出状态和全屏输入遮罩。
+    /// 所有正常结束、手动跳过和异常退出都必须走这里，避免某条分支忘记 Hide blocker。
+    /// </summary>
+    private void ResetCurrentExchangeState()
+    {
         _blocker?.Hide();
         _effectControl?.Clear();
+        _leftCharacter?.Play(CharacterAnimationState.Idle);
+        _rightCharacter?.Play(CharacterAnimationState.Idle);
         _currentExchange = null;
         _leftUnit = null;
         _rightUnit = null;
         _strikeIndex = 0;
         _phase = PlaybackPhase.Hidden;
         _phaseElapsed = 0.0f;
-        TryStartNextExchange();
+        _exchangeElapsed = 0.0f;
     }
 
     /// <summary>返回当前正在播放的攻击记录。</summary>
