@@ -17,7 +17,8 @@ public sealed class CombatStrikeResult
         bool hit,
         bool critical,
         int damage,
-        int hpCostPaid)
+        int hpCostPaid,
+        bool defenderDefeated)
     {
         Attacker = attacker;
         Defender = defender;
@@ -27,6 +28,7 @@ public sealed class CombatStrikeResult
         Critical = critical;
         Damage = damage;
         HpCostPaid = hpCostPaid;
+        DefenderDefeated = defenderDefeated;
     }
 
     /// <summary>发动本次攻击的单位。</summary>
@@ -52,11 +54,17 @@ public sealed class CombatStrikeResult
 
     /// <summary>发动攻击时支付的 HP 消耗；普通武器为 0。</summary>
     public int HpCostPaid { get; }
+
+    /// <summary>
+    /// 这一击结算结束后防守方是否已经倒下。
+    /// 该快照专门用于动画层判断应该播放受击还是倒下，不能用战斗全部结束后的最终生命状态替代。
+    /// </summary>
+    public bool DefenderDefeated { get; }
 }
 
 /// <summary>
 /// 保存一次完整战斗交换的全部攻击记录。
-/// UI 可以根据这些记录生成战斗日志或后续逐条播放动画。
+/// UI 可以根据这些记录生成战斗日志或逐条播放动画。
 /// </summary>
 public sealed class CombatExchangeResult
 {
@@ -145,7 +153,11 @@ public static class CombatResolver
             }
         }
 
-        return new CombatExchangeResult(strikes);
+        CombatExchangeResult exchange = new(strikes);
+
+        // 战斗数值全部确定以后再通知表现层；动画只消费结果，不参与规则运算。
+        BattleAnimationBus.Publish(exchange);
+        return exchange;
     }
 
     /// <summary>
@@ -193,6 +205,7 @@ public static class CombatResolver
             hit,
             critical,
             damage,
-            hpCost);
+            hpCost,
+            !defender.IsAlive);
     }
 }
