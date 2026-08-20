@@ -4,7 +4,7 @@ namespace FlameEmblem.Game;
 
 /// <summary>
 /// 表示单位所属阵营。
-/// 第一阶段实现玩家与敌军，后续可以继续扩展 NPC / 中立阵营。
+/// 当前实现玩家与敌军，后续可以继续扩展 NPC / 中立阵营。
 /// </summary>
 public enum UnitTeam
 {
@@ -48,12 +48,16 @@ public sealed class UnitModel
         UnitTeam team,
         Vector2I gridPosition,
         UnitClassDefinition classDefinition,
+        WeaponDefinition equippedWeapon,
         int level,
         int maxHp,
         int strength,
-        int defense,
+        int magic,
+        int skill,
         int speed,
-        int weaponMight,
+        int luck,
+        int defense,
+        int resistance,
         StatGrowthDefinition growth)
     {
         Id = id;
@@ -61,17 +65,21 @@ public sealed class UnitModel
         Team = team;
         GridPosition = gridPosition;
         ClassDefinition = classDefinition;
+        EquippedWeapon = equippedWeapon;
         Level = Mathf.Max(1, level);
         MaxHp = Mathf.Max(1, maxHp);
         CurrentHp = MaxHp;
         Strength = Mathf.Max(0, strength);
-        Defense = Mathf.Max(0, defense);
+        Magic = Mathf.Max(0, magic);
+        Skill = Mathf.Max(0, skill);
         Speed = Mathf.Max(0, speed);
-        WeaponMight = Mathf.Max(0, weaponMight);
+        Luck = Mathf.Max(0, luck);
+        Defense = Mathf.Max(0, defense);
+        Resistance = Mathf.Max(0, resistance);
         Growth = growth;
     }
 
-    /// <summary>稳定的单位 ID，未来用于存档和数据表关联。</summary>
+    /// <summary>稳定的单位 ID，用于存档和数据表关联。</summary>
     public string Id { get; }
 
     /// <summary>界面上展示的单位名称。</summary>
@@ -86,6 +94,9 @@ public sealed class UnitModel
     /// <summary>当前职业定义。</summary>
     public UnitClassDefinition ClassDefinition { get; }
 
+    /// <summary>当前装备的武器或法术。</summary>
+    public WeaponDefinition EquippedWeapon { get; private set; }
+
     /// <summary>当前角色等级。</summary>
     public int Level { get; private set; }
 
@@ -98,26 +109,35 @@ public sealed class UnitModel
     /// <summary>当前生命值。</summary>
     public int CurrentHp { get; private set; }
 
-    /// <summary>力量属性，参与物理伤害计算。</summary>
+    /// <summary>力量属性，参与物理攻击伤害。</summary>
     public int Strength { get; private set; }
+
+    /// <summary>魔力属性，参与魔法攻击伤害。</summary>
+    public int Magic { get; private set; }
+
+    /// <summary>技巧属性，参与命中与必杀率计算。</summary>
+    public int Skill { get; private set; }
+
+    /// <summary>速度属性，参与回避和追击判定。</summary>
+    public int Speed { get; private set; }
+
+    /// <summary>幸运属性，参与命中、回避与抗必杀。</summary>
+    public int Luck { get; private set; }
 
     /// <summary>防御属性，用于减少物理伤害。</summary>
     public int Defense { get; private set; }
 
-    /// <summary>速度属性，当前主要用于 HUD；后续会用于追击判定。</summary>
-    public int Speed { get; private set; }
+    /// <summary>魔防属性，用于减少魔法伤害。</summary>
+    public int Resistance { get; private set; }
 
     /// <summary>每回合最多可消耗的移动力，由职业提供。</summary>
     public int Move => ClassDefinition.Move;
 
-    /// <summary>当前职业允许的最小攻击距离。</summary>
-    public int MinAttackRange => ClassDefinition.MinAttackRange;
+    /// <summary>当前装备允许的最小攻击距离。</summary>
+    public int MinAttackRange => EquippedWeapon.MinRange;
 
-    /// <summary>当前职业允许的最大攻击距离。</summary>
-    public int MaxAttackRange => ClassDefinition.MaxAttackRange;
-
-    /// <summary>当前武器的基础威力。</summary>
-    public int WeaponMight { get; }
+    /// <summary>当前装备允许的最大攻击距离。</summary>
+    public int MaxAttackRange => EquippedWeapon.MaxRange;
 
     /// <summary>升级时使用的角色成长率。</summary>
     public StatGrowthDefinition Growth { get; }
@@ -129,6 +149,12 @@ public sealed class UnitModel
     public bool IsAlive => CurrentHp > 0;
 
     /// <summary>
+    /// 判断当前生命值是否足够使用装备。
+    /// 主要用于阻止 HP 不足的施法者继续施放消耗生命的法术。
+    /// </summary>
+    public bool CanUseEquippedWeapon => IsAlive && EquippedWeapon.CanPayHpCost(CurrentHp);
+
+    /// <summary>
     /// 对单位造成伤害，并把最终生命值限制在 0 以上。
     /// </summary>
     public void TakeDamage(int damage)
@@ -136,6 +162,34 @@ public sealed class UnitModel
         // 即使外部传入负数，也不能通过“伤害”意外给单位回血。
         int safeDamage = Mathf.Max(0, damage);
         CurrentHp = Mathf.Max(0, CurrentHp - safeDamage);
+    }
+
+    /// <summary>
+    /// 为当前装备支付一次 HP 使用成本。
+    /// 普通武器费用为 0；法术必须保证支付后至少剩余 1 HP。
+    /// </summary>
+    public bool TryPayEquippedWeaponHpCost()
+    {
+        if (!EquippedWeapon.CanPayHpCost(CurrentHp))
+        {
+            return false;
+        }
+
+        if (EquippedWeapon.HpCost > 0)
+        {
+            CurrentHp -= EquippedWeapon.HpCost;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 替换当前装备。
+    /// 当前阶段每个单位只装备一件武器/法术，后续加入背包时仍可复用此入口。
+    /// </summary>
+    public void Equip(WeaponDefinition weapon)
+    {
+        EquippedWeapon = weapon;
     }
 
     /// <summary>
@@ -187,10 +241,16 @@ public sealed class UnitModel
             changes.Add("力量 +1");
         }
 
-        if (PassesGrowthRoll(Growth.Defense, "defense"))
+        if (PassesGrowthRoll(Growth.Magic, "magic"))
         {
-            Defense++;
-            changes.Add("防御 +1");
+            Magic++;
+            changes.Add("魔力 +1");
+        }
+
+        if (PassesGrowthRoll(Growth.Skill, "skill"))
+        {
+            Skill++;
+            changes.Add("技巧 +1");
         }
 
         if (PassesGrowthRoll(Growth.Speed, "speed"))
@@ -199,12 +259,30 @@ public sealed class UnitModel
             changes.Add("速度 +1");
         }
 
+        if (PassesGrowthRoll(Growth.Luck, "luck"))
+        {
+            Luck++;
+            changes.Add("幸运 +1");
+        }
+
+        if (PassesGrowthRoll(Growth.Defense, "defense"))
+        {
+            Defense++;
+            changes.Add("防御 +1");
+        }
+
+        if (PassesGrowthRoll(Growth.Resistance, "resistance"))
+        {
+            Resistance++;
+            changes.Add("魔防 +1");
+        }
+
         return new LevelUpResult(Level, changes);
     }
 
     /// <summary>
     /// 对指定属性执行可复现的成长率判定。
-    /// 这里不调用联网服务，也不使用机器学习；只是普通确定性哈希和百分比比较。
+    /// 这里只使用普通确定性哈希与百分比比较，不依赖联网服务或机器学习。
     /// </summary>
     private bool PassesGrowthRoll(int growthRate, string statKey)
     {
@@ -222,7 +300,7 @@ public sealed class UnitModel
         string seedText = $"{Id}:{Level}:{statKey}";
         uint hash = 2166136261;
 
-        // FNV-1a 提供简单稳定的跨运行哈希，足够用于原型成长率判定。
+        // FNV-1a 提供简单稳定的跨运行哈希，足够用于当前升级成长率判定。
         foreach (char character in seedText)
         {
             hash ^= character;
