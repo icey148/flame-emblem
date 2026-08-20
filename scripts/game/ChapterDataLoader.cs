@@ -58,8 +58,8 @@ public sealed class LoadedChapter
 }
 
 /// <summary>
-/// 从 res://data 下的 JSON 文件加载职业、角色模板和章节部署数据。
-/// 这样关卡策划数据与 C# 战斗规则分离，后续扩内容时不需要修改主场景。
+/// 从 res://data 下的 JSON 文件加载职业、武器、角色模板和章节部署数据。
+/// 这样关卡内容与 C# 战斗规则分离，后续扩角色和装备时不需要修改主场景。
 /// </summary>
 public static class ChapterDataLoader
 {
@@ -70,11 +70,12 @@ public static class ChapterDataLoader
     };
 
     /// <summary>
-    /// 加载指定章节，并把职业、角色模板、地图部署合并成运行时模型。
+    /// 加载指定章节，并把职业、武器、角色模板、地图部署合并成运行时模型。
     /// </summary>
     public static LoadedChapter Load(string chapterPath)
     {
         ClassFile classFile = DeserializeFile<ClassFile>("res://data/classes.json");
+        WeaponFile weaponFile = DeserializeFile<WeaponFile>("res://data/weapons.json");
         UnitFile unitFile = DeserializeFile<UnitFile>("res://data/units.json");
         ChapterFile chapterFile = DeserializeFile<ChapterFile>(chapterPath);
 
@@ -86,6 +87,20 @@ public static class ChapterDataLoader
                 Mathf.Max(1, item.Move),
                 Mathf.Max(1, item.MinAttackRange),
                 Mathf.Max(item.MinAttackRange, item.MaxAttackRange)),
+            StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, WeaponDefinition> weapons = weaponFile.Weapons.ToDictionary(
+            item => item.Id,
+            item => new WeaponDefinition(
+                item.Id,
+                item.Name,
+                ParseDamageType(item.DamageType),
+                item.Might,
+                item.Hit,
+                item.Critical,
+                item.MinRange,
+                item.MaxRange,
+                item.HpCost),
             StringComparer.OrdinalIgnoreCase);
 
         Dictionary<string, UnitTemplateDto> templates = unitFile.Units.ToDictionary(
@@ -107,6 +122,11 @@ public static class ChapterDataLoader
                 throw new InvalidOperationException($"角色 {template.Id} 引用了不存在的职业：{template.ClassId}");
             }
 
+            if (!weapons.TryGetValue(template.WeaponId, out WeaponDefinition? weaponDefinition))
+            {
+                throw new InvalidOperationException($"角色 {template.Id} 引用了不存在的武器/法术：{template.WeaponId}");
+            }
+
             UnitTeam team = spawn.Team.Equals("enemy", StringComparison.OrdinalIgnoreCase)
                 ? UnitTeam.Enemy
                 : UnitTeam.Player;
@@ -114,8 +134,12 @@ public static class ChapterDataLoader
             StatGrowthDefinition growth = new(
                 template.Growth.Hp,
                 template.Growth.Strength,
+                template.Growth.Magic,
+                template.Growth.Skill,
+                template.Growth.Speed,
+                template.Growth.Luck,
                 template.Growth.Defense,
-                template.Growth.Speed);
+                template.Growth.Resistance);
 
             // instance_id 用于同一角色模板在同一章节生成多个独立敌军实例。
             string runtimeId = string.IsNullOrWhiteSpace(spawn.InstanceId)
@@ -128,12 +152,16 @@ public static class ChapterDataLoader
                 team,
                 new Vector2I(spawn.X, spawn.Y),
                 classDefinition,
+                weaponDefinition,
                 template.Level,
                 template.MaxHp,
                 template.Strength,
-                template.Defense,
+                template.Magic,
+                template.Skill,
                 template.Speed,
-                template.WeaponMight,
+                template.Luck,
+                template.Defense,
+                template.Resistance,
                 growth));
         }
 
@@ -146,6 +174,18 @@ public static class ChapterDataLoader
             chapterFile.VictoryTargetId,
             terrain,
             units);
+    }
+
+    /// <summary>
+    /// 把 JSON 中的伤害类型字符串转换成运行时枚举。
+    /// 未识别值默认按物理处理，避免单个拼写错误导致整个章节无法进入。
+    /// </summary>
+    private static DamageType ParseDamageType(string value)
+    {
+        return value.Equals("magical", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("magic", StringComparison.OrdinalIgnoreCase)
+            ? DamageType.Magical
+            : DamageType.Physical;
     }
 
     /// <summary>
@@ -205,7 +245,7 @@ public static class ChapterDataLoader
         public List<ClassDto> Classes { get; set; } = new();
     }
 
-    /// <summary>单个职业的 JSON 数据传输对象。</summary>
+    /// <summary>单个职业的 JSON 数据对象。</summary>
     private sealed class ClassDto
     {
         /// <summary>职业 ID。</summary>
@@ -220,13 +260,61 @@ public static class ChapterDataLoader
         [JsonPropertyName("move")]
         public int Move { get; set; }
 
-        /// <summary>最小攻击距离。</summary>
+        /// <summary>职业默认最小攻击距离。</summary>
         [JsonPropertyName("min_attack_range")]
         public int MinAttackRange { get; set; } = 1;
 
-        /// <summary>最大攻击距离。</summary>
+        /// <summary>职业默认最大攻击距离。</summary>
         [JsonPropertyName("max_attack_range")]
         public int MaxAttackRange { get; set; } = 1;
+    }
+
+    /// <summary>weapons.json 的根对象。</summary>
+    private sealed class WeaponFile
+    {
+        /// <summary>全部武器与法术条目。</summary>
+        [JsonPropertyName("weapons")]
+        public List<WeaponDto> Weapons { get; set; } = new();
+    }
+
+    /// <summary>单个武器或法术的数据对象。</summary>
+    private sealed class WeaponDto
+    {
+        /// <summary>武器 ID。</summary>
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        /// <summary>武器显示名称。</summary>
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>physical 或 magical。</summary>
+        [JsonPropertyName("damage_type")]
+        public string DamageType { get; set; } = "physical";
+
+        /// <summary>基础威力。</summary>
+        [JsonPropertyName("might")]
+        public int Might { get; set; }
+
+        /// <summary>基础命中率。</summary>
+        [JsonPropertyName("hit")]
+        public int Hit { get; set; }
+
+        /// <summary>基础必杀率。</summary>
+        [JsonPropertyName("critical")]
+        public int Critical { get; set; }
+
+        /// <summary>最小攻击距离。</summary>
+        [JsonPropertyName("min_range")]
+        public int MinRange { get; set; } = 1;
+
+        /// <summary>最大攻击距离。</summary>
+        [JsonPropertyName("max_range")]
+        public int MaxRange { get; set; } = 1;
+
+        /// <summary>每次使用需要支付的 HP。</summary>
+        [JsonPropertyName("hp_cost")]
+        public int HpCost { get; set; }
     }
 
     /// <summary>units.json 的根对象。</summary>
@@ -237,7 +325,7 @@ public static class ChapterDataLoader
         public List<UnitTemplateDto> Units { get; set; } = new();
     }
 
-    /// <summary>角色模板 JSON 数据传输对象。</summary>
+    /// <summary>角色模板 JSON 数据对象。</summary>
     private sealed class UnitTemplateDto
     {
         /// <summary>模板 ID。</summary>
@@ -252,6 +340,10 @@ public static class ChapterDataLoader
         [JsonPropertyName("class_id")]
         public string ClassId { get; set; } = string.Empty;
 
+        /// <summary>当前装备的武器/法术 ID。</summary>
+        [JsonPropertyName("weapon_id")]
+        public string WeaponId { get; set; } = string.Empty;
+
         /// <summary>初始等级。</summary>
         [JsonPropertyName("level")]
         public int Level { get; set; } = 1;
@@ -264,24 +356,36 @@ public static class ChapterDataLoader
         [JsonPropertyName("strength")]
         public int Strength { get; set; }
 
-        /// <summary>防御。</summary>
-        [JsonPropertyName("defense")]
-        public int Defense { get; set; }
+        /// <summary>魔力。</summary>
+        [JsonPropertyName("magic")]
+        public int Magic { get; set; }
+
+        /// <summary>技巧。</summary>
+        [JsonPropertyName("skill")]
+        public int Skill { get; set; }
 
         /// <summary>速度。</summary>
         [JsonPropertyName("speed")]
         public int Speed { get; set; }
 
-        /// <summary>武器威力。</summary>
-        [JsonPropertyName("weapon_might")]
-        public int WeaponMight { get; set; }
+        /// <summary>幸运。</summary>
+        [JsonPropertyName("luck")]
+        public int Luck { get; set; }
+
+        /// <summary>防御。</summary>
+        [JsonPropertyName("defense")]
+        public int Defense { get; set; }
+
+        /// <summary>魔防。</summary>
+        [JsonPropertyName("resistance")]
+        public int Resistance { get; set; }
 
         /// <summary>升级成长率。</summary>
         [JsonPropertyName("growth")]
         public GrowthDto Growth { get; set; } = new();
     }
 
-    /// <summary>角色成长率 JSON 数据传输对象。</summary>
+    /// <summary>角色成长率 JSON 数据对象。</summary>
     private sealed class GrowthDto
     {
         /// <summary>生命成长率。</summary>
@@ -292,13 +396,29 @@ public static class ChapterDataLoader
         [JsonPropertyName("strength")]
         public int Strength { get; set; }
 
-        /// <summary>防御成长率。</summary>
-        [JsonPropertyName("defense")]
-        public int Defense { get; set; }
+        /// <summary>魔力成长率。</summary>
+        [JsonPropertyName("magic")]
+        public int Magic { get; set; }
+
+        /// <summary>技巧成长率。</summary>
+        [JsonPropertyName("skill")]
+        public int Skill { get; set; }
 
         /// <summary>速度成长率。</summary>
         [JsonPropertyName("speed")]
         public int Speed { get; set; }
+
+        /// <summary>幸运成长率。</summary>
+        [JsonPropertyName("luck")]
+        public int Luck { get; set; }
+
+        /// <summary>防御成长率。</summary>
+        [JsonPropertyName("defense")]
+        public int Defense { get; set; }
+
+        /// <summary>魔防成长率。</summary>
+        [JsonPropertyName("resistance")]
+        public int Resistance { get; set; }
     }
 
     /// <summary>章节 JSON 根对象。</summary>
