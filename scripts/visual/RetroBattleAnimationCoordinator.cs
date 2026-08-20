@@ -106,12 +106,12 @@ public partial class RetroBattleAnimationCoordinator : Node
                 return;
             }
 
-            float frameDelta = Math.Max(0.0f, (float)delta);
+            float frameDelta = MathF.Max(0.0f, (float)delta);
             _phaseElapsed += frameDelta;
             _exchangeElapsed += frameDelta;
 
             // 正常一击不到 1.2 秒；动态总上限只是最后保险，不参与正常节奏。
-            float exchangeTimeout = Math.Max(
+            float exchangeTimeout = MathF.Max(
                 MinimumExchangeTimeoutSeconds,
                 _currentExchange.Strikes.Count * MaximumSecondsPerStrike + 2.0f);
             if (_exchangeElapsed >= exchangeTimeout)
