@@ -487,7 +487,7 @@ public partial class UnitCharacterLayer : Node2D
 
             case CharacterWeaponSilhouette.Tome:
                 // 法书靠近胸前，旁边增加一颗强调色魔力像素。
-                DrawPixelBlock(origin, anchorX - (side < 0 ? 1 : 0), 10, 2, 3, outline: darkMetal);
+                DrawPixelBlock(origin, anchorX - (side < 0 ? 1 : 0), 10, 2, 3, darkMetal);
                 DrawPixelBlock(origin, anchorX - (side < 0 ? 1 : 0), 10, 1, 2, appearance.AccentColor);
                 DrawPixelBlock(origin, anchorX + side, 8, 1, 1, appearance.AccentColor.Lightened(0.28f));
                 break;
