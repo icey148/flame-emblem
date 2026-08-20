@@ -13,6 +13,12 @@ public static class BattleAnimationBus
     public static event Action<CombatExchangeResult>? ExchangeResolved;
 
     /// <summary>
+    /// 当前是否正在显示横向战斗演出。
+    /// 地图人物表现层会利用这个只读状态暂停后台移动动画，避免敌军在战斗遮罩后面把移动动画偷偷播完。
+    /// </summary>
+    public static bool IsPlaybackActive { get; private set; }
+
+    /// <summary>
     /// 发布一次已经完成结算的战斗交换。
     /// 没有任何有效攻击记录时不触发事件，避免空演出占用玩家时间。
     /// </summary>
@@ -24,5 +30,23 @@ public static class BattleAnimationBus
         }
 
         ExchangeResolved?.Invoke(exchange);
+    }
+
+    /// <summary>
+    /// 由战斗表现协调器在真正打开横向战斗窗口时调用。
+    /// 这是纯表现状态，不代表游戏规则正在重新结算。
+    /// </summary>
+    public static void BeginPlayback()
+    {
+        IsPlaybackActive = true;
+    }
+
+    /// <summary>
+    /// 由战斗表现协调器在正常结束、跳过或异常退出时调用。
+    /// 必须确保所有退出路径都会执行，防止地图人物动画永久停住。
+    /// </summary>
+    public static void EndPlayback()
+    {
+        IsPlaybackActive = false;
     }
 }
