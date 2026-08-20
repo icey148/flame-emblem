@@ -17,6 +17,8 @@ public sealed class LoadedChapter
         string title,
         int width,
         int height,
+        string victoryCondition,
+        string victoryTargetId,
         IReadOnlyDictionary<Vector2I, TerrainType> terrain,
         IReadOnlyList<UnitModel> units)
     {
@@ -24,6 +26,8 @@ public sealed class LoadedChapter
         Title = title;
         Width = width;
         Height = height;
+        VictoryCondition = victoryCondition;
+        VictoryTargetId = victoryTargetId;
         Terrain = terrain;
         Units = units;
     }
@@ -39,6 +43,12 @@ public sealed class LoadedChapter
 
     /// <summary>地图高度，单位为格。</summary>
     public int Height { get; }
+
+    /// <summary>胜利条件类型；当前支持 defeat_target 与 rout。</summary>
+    public string VictoryCondition { get; }
+
+    /// <summary>defeat_target 胜利条件对应的目标单位实例 ID。</summary>
+    public string VictoryTargetId { get; }
 
     /// <summary>非默认平地格的地形覆盖表。</summary>
     public IReadOnlyDictionary<Vector2I, TerrainType> Terrain { get; }
@@ -132,6 +142,8 @@ public static class ChapterDataLoader
             chapterFile.Title,
             Mathf.Max(1, chapterFile.Width),
             Mathf.Max(1, chapterFile.Height),
+            string.IsNullOrWhiteSpace(chapterFile.VictoryCondition) ? "rout" : chapterFile.VictoryCondition,
+            chapterFile.VictoryTargetId,
             terrain,
             units);
     }
@@ -307,6 +319,14 @@ public static class ChapterDataLoader
         /// <summary>地图高度。</summary>
         [JsonPropertyName("height")]
         public int Height { get; set; }
+
+        /// <summary>胜利条件类型。</summary>
+        [JsonPropertyName("victory_condition")]
+        public string VictoryCondition { get; set; } = "rout";
+
+        /// <summary>需要击败的目标单位实例 ID。</summary>
+        [JsonPropertyName("victory_target_id")]
+        public string VictoryTargetId { get; set; } = string.Empty;
 
         /// <summary>非平地地形分组。</summary>
         [JsonPropertyName("terrain")]
