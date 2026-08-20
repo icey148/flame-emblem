@@ -41,10 +41,8 @@ public partial class BattleDuelPreviewControl : Control
         MouseFilter = MouseFilterEnum.Ignore;
         Visible = false;
 
-        PanelContainer panel = new()
-        {
-            SetAnchorsAndOffsetsPreset = LayoutPreset.FullRect
-        };
+        PanelContainer panel = new();
+        panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(panel);
 
         HBoxContainer row = new()
