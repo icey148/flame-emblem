@@ -6,9 +6,7 @@ namespace FlameEmblem.Game;
 /// </summary>
 public sealed class CombatStrikeResult
 {
-    /// <summary>
-    /// 创建一次攻击结果。
-    /// </summary>
+    /// <summary>创建一次攻击结果。</summary>
     public CombatStrikeResult(
         UnitModel attacker,
         UnitModel defender,
@@ -57,27 +55,46 @@ public sealed class CombatStrikeResult
 
     /// <summary>
     /// 这一击结算结束后防守方是否已经倒下。
-    /// 该快照专门用于动画层判断应该播放受击还是倒下，不能用战斗全部结束后的最终生命状态替代。
+    /// 动画层使用该快照决定播放受击还是倒下，不能改读整场战斗结束后的最终生命状态。
     /// </summary>
     public bool DefenderDefeated { get; }
 }
 
 /// <summary>
-/// 保存一次完整战斗交换的全部攻击记录。
-/// UI 可以根据这些记录生成战斗日志或逐条播放动画。
+/// 保存一次完整战斗交换的全部攻击记录以及开战前生命值。
+/// 开战 HP 专门给表现层按攻击顺序重放血条，避免动画一出现就直接显示最终生命值。
 /// </summary>
 public sealed class CombatExchangeResult
 {
-    /// <summary>
-    /// 创建战斗交换结果。
-    /// </summary>
-    public CombatExchangeResult(IReadOnlyList<CombatStrikeResult> strikes)
+    /// <summary>创建战斗交换结果。</summary>
+    public CombatExchangeResult(
+        IReadOnlyList<CombatStrikeResult> strikes,
+        UnitModel initiatingAttacker,
+        UnitModel initiatingDefender,
+        int initiatingAttackerHpBefore,
+        int initiatingDefenderHpBefore)
     {
         Strikes = strikes;
+        InitiatingAttacker = initiatingAttacker;
+        InitiatingDefender = initiatingDefender;
+        InitiatingAttackerHpBefore = initiatingAttackerHpBefore;
+        InitiatingDefenderHpBefore = initiatingDefenderHpBefore;
     }
 
     /// <summary>按照实际发生顺序排列的攻击记录。</summary>
     public IReadOnlyList<CombatStrikeResult> Strikes { get; }
+
+    /// <summary>整场交换最初发起攻击的单位。</summary>
+    public UnitModel InitiatingAttacker { get; }
+
+    /// <summary>整场交换最初承受攻击的单位。</summary>
+    public UnitModel InitiatingDefender { get; }
+
+    /// <summary>主动方在支付法术 HP 成本和造成任何伤害之前的 HP。</summary>
+    public int InitiatingAttackerHpBefore { get; }
+
+    /// <summary>防守方在承受任何攻击之前的 HP。</summary>
+    public int InitiatingDefenderHpBefore { get; }
 }
 
 /// <summary>
@@ -88,7 +105,7 @@ public static class CombatResolver
 {
     /// <summary>
     /// 执行主动攻击 → 反击 → 速度追击的完整流程。
-    /// 任意一方被击倒后会立即停止后续攻击。
+    /// 任意一方被击倒后立即停止后续攻击。
     /// </summary>
     public static CombatExchangeResult ResolveExchange(
         UnitModel attacker,
@@ -97,6 +114,9 @@ public static class CombatResolver
         TerrainDefinition defenderTerrain,
         Random random)
     {
+        // 动画需要真正的开战 HP，所以必须在任何法术成本或伤害发生之前记录。
+        int attackerHpBefore = attacker.CurrentHp;
+        int defenderHpBefore = defender.CurrentHp;
         List<CombatStrikeResult> strikes = new();
 
         // 主动方先攻击一次，这是一次交换成立的前提。
@@ -124,7 +144,7 @@ public static class CombatResolver
             }
         }
 
-        // 追击放在首次反击之后；速度领先至少 4 点的一方最多追加一次攻击。
+        // 追击发生在首次反击之后；速度领先至少 4 点的一方最多追加一次攻击。
         if (attacker.IsAlive && defender.IsAlive)
         {
             if (CombatRules.CanFollowUp(attacker, defender) && CombatRules.CanAttack(attacker, defender))
@@ -153,7 +173,12 @@ public static class CombatResolver
             }
         }
 
-        CombatExchangeResult exchange = new(strikes);
+        CombatExchangeResult exchange = new(
+            strikes,
+            attacker,
+            defender,
+            attackerHpBefore,
+            defenderHpBefore);
 
         // 战斗数值全部确定以后再通知表现层；动画只消费结果，不参与规则运算。
         BattleAnimationBus.Publish(exchange);
@@ -192,7 +217,7 @@ public static class CombatResolver
             critical = random.Next(100) < criticalRate;
             int normalDamage = CombatRules.CalculateDamage(attacker, defender, defenderTerrain.DefenseBonus);
 
-            // 必杀伤害使用普通伤害的 3 倍；0 伤害即使必杀仍然保持 0。
+            // 必杀伤害使用普通伤害的 3 倍；0 伤害即使必杀仍保持 0。
             damage = critical ? normalDamage * 3 : normalDamage;
             defender.TakeDamage(damage);
         }
