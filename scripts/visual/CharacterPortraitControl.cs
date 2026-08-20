@@ -88,6 +88,7 @@ public partial class CharacterPortraitControl : Control
         Color hairShadow = appearance.HairColor.Darkened(0.22f);
         Color skin = appearance.SkinColor;
         Color accent = appearance.AccentColor;
+        Color metal = new(0.60f, 0.62f, 0.64f);
 
         // 披风和肩部先画在后方，形成宽阔的胸像轮廓。
         if (appearance.HasCape)
@@ -95,12 +96,7 @@ public partial class CharacterPortraitControl : Control
             DrawPortraitPixel(origin, pixel, 3, 14, 18, 9, accent.Darkened(0.25f));
         }
 
-        // 胸甲/服装使用三层色阶，保持 8/16 位时代有限调色板的读图方式。
-        DrawPortraitPixel(origin, pixel, 4, 13, 16, 10, outline);
-        DrawPortraitPixel(origin, pixel, 5, 14, 14, 9, outfit);
-        DrawPortraitPixel(origin, pixel, 5, 14, 5, 7, outfitLight);
-        DrawPortraitPixel(origin, pixel, 16, 17, 3, 6, outfitShadow);
-        DrawPortraitPixel(origin, pixel, 5, 19, 14, 2, accent);
+        DrawPortraitBody(origin, pixel, appearance, outline, outfit, outfitShadow, outfitLight, accent, metal);
 
         // 颈部和脸部采用方形轮廓，不使用圆形或抗锯齿曲线。
         DrawPortraitPixel(origin, pixel, 10, 11, 4, 4, skin.Darkened(0.08f));
@@ -120,6 +116,58 @@ public partial class CharacterPortraitControl : Control
 
         // 根据职业给胸像增加一个很小的装备标记，帮助快速识别角色定位。
         DrawPortraitClassMark(origin, pixel, appearance, outline, accent);
+    }
+
+    /// <summary>
+    /// 根据身体模板绘制胸像肩部与服装结构。
+    /// 重甲强调肩甲/胸甲，长袍强调领口与披肩，轻装保持简洁窄肩。
+    /// </summary>
+    private void DrawPortraitBody(
+        Vector2 origin,
+        float pixel,
+        CharacterAppearanceDefinition appearance,
+        Color outline,
+        Color outfit,
+        Color shadow,
+        Color light,
+        Color accent,
+        Color metal)
+    {
+        switch (appearance.BodySilhouette)
+        {
+            case CharacterBodySilhouette.Armored:
+                // 重甲胸像：肩部横向更宽，并增加金属肩甲和中央胸甲高光。
+                DrawPortraitPixel(origin, pixel, 2, 13, 20, 10, outline);
+                DrawPortraitPixel(origin, pixel, 4, 14, 16, 9, outfit);
+                DrawPortraitPixel(origin, pixel, 2, 14, 5, 5, metal.Darkened(0.12f));
+                DrawPortraitPixel(origin, pixel, 17, 14, 5, 5, metal.Darkened(0.12f));
+                DrawPortraitPixel(origin, pixel, 6, 14, 4, 7, light);
+                DrawPortraitPixel(origin, pixel, 16, 17, 4, 6, shadow);
+                DrawPortraitPixel(origin, pixel, 8, 15, 8, 2, metal.Lightened(0.10f));
+                DrawPortraitPixel(origin, pixel, 4, 20, 16, 2, accent);
+                break;
+
+            case CharacterBodySilhouette.Robed:
+                // 长袍胸像：窄肩、宽袖与 V 形领口，突出施法职业的柔软服装结构。
+                DrawPortraitPixel(origin, pixel, 4, 13, 16, 10, outline);
+                DrawPortraitPixel(origin, pixel, 5, 14, 14, 9, outfit);
+                DrawPortraitPixel(origin, pixel, 3, 15, 4, 7, shadow);
+                DrawPortraitPixel(origin, pixel, 17, 15, 4, 7, shadow);
+                DrawPortraitPixel(origin, pixel, 6, 14, 4, 7, light);
+                DrawPortraitPixel(origin, pixel, 9, 14, 2, 4, accent);
+                DrawPortraitPixel(origin, pixel, 13, 14, 2, 4, accent);
+                DrawPortraitPixel(origin, pixel, 7, 20, 10, 2, accent.Darkened(0.15f));
+                break;
+
+            default:
+                // 轻装胸像：窄肩与短上衣，保留更多人物脸部空间。
+                DrawPortraitPixel(origin, pixel, 4, 13, 16, 10, outline);
+                DrawPortraitPixel(origin, pixel, 5, 14, 14, 9, outfit);
+                DrawPortraitPixel(origin, pixel, 5, 14, 5, 7, light);
+                DrawPortraitPixel(origin, pixel, 16, 17, 3, 6, shadow);
+                DrawPortraitPixel(origin, pixel, 5, 19, 14, 2, accent);
+                break;
+        }
     }
 
     /// <summary>
