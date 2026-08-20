@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 横向战斗演出底部的复古状态 HUD。
-/// 该控件只消费已经结算好的战斗结果，按动画顺序重放 HP 变化，并在收尾阶段展示玩家获得的经验值。
+/// 该控件只消费已经结算好的战斗结果，按动画顺序重放 HP 变化，并在战后播放 EXP 增长与升级反馈。
 /// </summary>
 public partial class RetroBattleStatusHudControl : Control
 {
@@ -31,13 +31,37 @@ public partial class RetroBattleStatusHudControl : Control
     private int _rightMaxHp = 1;
 
     /// <summary>玩家获得经验前的等级。</summary>
-    private int _experienceLevelBefore;
+    private int _experienceLevelBefore = 1;
 
     /// <summary>玩家获得经验前的 EXP。</summary>
     private int _experienceBefore;
 
+    /// <summary>本场实际获得的经验值。</summary>
+    private int _experienceGained;
+
     /// <summary>当前是否已经进入战后经验展示阶段。</summary>
     private bool _showExperienceResult;
+
+    /// <summary>EXP 条是否正在从旧值滚动到新值。</summary>
+    private bool _experienceAnimating;
+
+    /// <summary>EXP 动画已经播放的秒数。</summary>
+    private float _experienceAnimationElapsed;
+
+    /// <summary>EXP 动画总时长。</summary>
+    private float _experienceAnimationDuration = 0.8f;
+
+    /// <summary>
+    /// 把“等级 + EXP”转换成连续总经验后的动画起点。
+    /// 使用 (等级 - 1) × 100，确保 Lv.1 EXP 0 对应总值 0。
+    /// </summary>
+    private int _experienceAnimationStartTotal;
+
+    /// <summary>连续总经验动画终点。</summary>
+    private int _experienceAnimationEndTotal;
+
+    /// <summary>当前动画正在展示的连续总经验值。</summary>
+    private int _animatedExperienceTotal;
 
     /// <summary>左侧姓名与武器文本。</summary>
     private Label? _leftIdentityLabel;
@@ -54,18 +78,20 @@ public partial class RetroBattleStatusHudControl : Control
     /// <summary>中央本击伤害/结果文字。</summary>
     private Label? _damageLabel;
 
-    /// <summary>中央经验值文字。</summary>
+    /// <summary>中央经验值与升级文字。</summary>
     private Label? _experienceLabel;
 
     /// <summary>
     /// 创建固定文字控件并使用最近邻画面策略。
-    /// HUD 本身全部使用整数坐标矩形，不绘制圆角或抗锯齿装饰。
+    /// HUD 全部使用整数坐标矩形，不绘制圆角或抗锯齿装饰。
     /// </summary>
     public override void _Ready()
     {
+        ProcessMode = ProcessModeEnum.Always;
         MouseFilter = MouseFilterEnum.Ignore;
         TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
         CreateLabels();
+        SetProcess(false);
         QueueRedraw();
     }
 
@@ -91,9 +117,16 @@ public partial class RetroBattleStatusHudControl : Control
         _leftMaxHp = Math.Max(1, leftMaxHp);
         _rightMaxHp = Math.Max(1, rightMaxHp);
         _experienceUnit = experienceUnit;
-        _experienceLevelBefore = experienceLevelBefore;
+        _experienceLevelBefore = Math.Max(1, experienceLevelBefore);
         _experienceBefore = Math.Clamp(experienceBefore, 0, 99);
+        _experienceGained = 0;
         _showExperienceResult = false;
+        _experienceAnimating = false;
+        _experienceAnimationElapsed = 0.0f;
+        _experienceAnimationStartTotal = ToTotalExperience(_experienceLevelBefore, _experienceBefore);
+        _experienceAnimationEndTotal = _experienceAnimationStartTotal;
+        _animatedExperienceTotal = _experienceAnimationStartTotal;
+        SetProcess(false);
 
         if (_leftIdentityLabel is not null)
         {
@@ -167,32 +200,87 @@ public partial class RetroBattleStatusHudControl : Control
     }
 
     /// <summary>
-    /// 战斗所有攻击结束后读取玩家当前等级/经验，和事件触发瞬间保存的旧值比较。
-    /// MainGame 会在 ResolveExchange 返回以后发放经验，因此此时可以得到真实最终结果。
+    /// 战斗所有攻击结束后启动 EXP 增长动画。
+    /// MainGame 会在 ResolveExchange 返回以后发放经验，因此这里读取到的是已经真实结算后的最终等级与 EXP。
     /// </summary>
     public int ShowExperienceResult()
     {
         _showExperienceResult = true;
-        int gained = CalculateExperienceGain();
+        _experienceGained = CalculateExperienceGain();
 
-        if (_experienceLabel is not null)
+        if (_experienceUnit is null)
         {
-            if (_experienceUnit is null)
-            {
-                _experienceLabel.Text = "EXP  --";
-            }
-            else if (_experienceUnit.Level > _experienceLevelBefore)
-            {
-                _experienceLabel.Text = $"LEVEL UP  Lv.{_experienceUnit.Level}   EXP +{gained}";
-            }
-            else
-            {
-                _experienceLabel.Text = $"EXP +{gained}   {_experienceUnit.Experience}/100";
-            }
+            _experienceAnimating = false;
+            SetProcess(false);
+            SetExperienceLabel("EXP  --");
+            QueueRedraw();
+            return 0;
+        }
+
+        _experienceAnimationStartTotal = ToTotalExperience(_experienceLevelBefore, _experienceBefore);
+        _experienceAnimationEndTotal = _experienceAnimationStartTotal + _experienceGained;
+        _animatedExperienceTotal = _experienceAnimationStartTotal;
+        _experienceAnimationElapsed = 0.0f;
+
+        // 小额经验也至少播放半秒；高经验最多约一秒，保证不拖慢战斗节奏。
+        _experienceAnimationDuration = Math.Clamp(
+            0.58f + _experienceGained * 0.006f,
+            0.58f,
+            1.02f);
+        _experienceAnimating = _experienceGained > 0;
+        SetProcess(_experienceAnimating);
+
+        if (!_experienceAnimating)
+        {
+            _animatedExperienceTotal = _experienceAnimationEndTotal;
+            RefreshExperienceLabel(true);
+        }
+        else
+        {
+            RefreshExperienceLabel(false);
         }
 
         QueueRedraw();
-        return gained;
+        return _experienceGained;
+    }
+
+    /// <summary>
+    /// EXP 动画按连续总经验推进。
+    /// 跨过 100 时条会自然从满格回到 0，并同步把显示等级提升一级。
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        if (!_experienceAnimating)
+        {
+            return;
+        }
+
+        _experienceAnimationElapsed += Math.Max(0.0f, (float)delta);
+        float t = Mathf.Clamp(
+            _experienceAnimationElapsed / Math.Max(0.01f, _experienceAnimationDuration),
+            0.0f,
+            1.0f);
+
+        // 使用轻微 ease-out，让 EXP 前段增长更有反馈，末尾停得更稳。
+        float eased = 1.0f - (1.0f - t) * (1.0f - t);
+        _animatedExperienceTotal = (int)MathF.Round(Mathf.Lerp(
+            _experienceAnimationStartTotal,
+            _experienceAnimationEndTotal,
+            eased));
+
+        if (t >= 1.0f)
+        {
+            _animatedExperienceTotal = _experienceAnimationEndTotal;
+            _experienceAnimating = false;
+            SetProcess(false);
+            RefreshExperienceLabel(true);
+        }
+        else
+        {
+            RefreshExperienceLabel(false);
+        }
+
+        QueueRedraw();
     }
 
     /// <summary>清空中央结果信息，供下一场战斗重新使用。</summary>
@@ -202,8 +290,11 @@ public partial class RetroBattleStatusHudControl : Control
         _rightUnit = null;
         _experienceUnit = null;
         _showExperienceResult = false;
+        _experienceAnimating = false;
+        _experienceGained = 0;
         _leftHp = 0;
         _rightHp = 0;
+        SetProcess(false);
 
         if (_damageLabel is not null)
         {
@@ -247,12 +338,23 @@ public partial class RetroBattleStatusHudControl : Control
 
         if (_experienceUnit is not null)
         {
-            int expValue = _showExperienceResult ? _experienceUnit.Experience : _experienceBefore;
+            int expValue = CurrentDisplayedExperience();
             DrawExperienceBar(
                 new Rect2(new Vector2(425, 88), new Vector2(180, 10)),
                 expValue,
                 barBack,
                 new Color(0.86f, 0.72f, 0.27f, 1.0f));
+
+            // EXP 每 10 点增加一个小刻度，强化老式战棋 HUD 的离散读数感。
+            for (int mark = 1; mark < 10; mark++)
+            {
+                float x = 425 + mark * 18;
+                DrawLine(
+                    new Vector2(x, 88),
+                    new Vector2(x, 98),
+                    new Color(0.15f, 0.13f, 0.10f, 0.72f),
+                    1.0f);
+            }
         }
     }
 
@@ -275,7 +377,7 @@ public partial class RetroBattleStatusHudControl : Control
         _damageLabel.VerticalAlignment = VerticalAlignment.Center;
         AddChild(_damageLabel);
 
-        _experienceLabel = CreateLabel(new Vector2(420, 56), new Vector2(190, 30), HorizontalAlignment.Center, 14);
+        _experienceLabel = CreateLabel(new Vector2(416, 54), new Vector2(198, 32), HorizontalAlignment.Center, 14);
         _experienceLabel.VerticalAlignment = VerticalAlignment.Center;
         AddChild(_experienceLabel);
     }
@@ -295,6 +397,9 @@ public partial class RetroBattleStatusHudControl : Control
             MouseFilter = MouseFilterEnum.Ignore
         };
         label.AddThemeColorOverride("font_color", new Color(0.94f, 0.91f, 0.82f));
+        label.AddThemeColorOverride("font_shadow_color", new Color(0.02f, 0.02f, 0.025f, 0.86f));
+        label.AddThemeConstantOverride("shadow_offset_x", 1);
+        label.AddThemeConstantOverride("shadow_offset_y", 1);
         label.AddThemeFontSizeOverride("font_size", fontSize);
         return label;
     }
@@ -318,6 +423,46 @@ public partial class RetroBattleStatusHudControl : Control
                 ? "EXP  --"
                 : $"EXP {_experienceBefore}/100";
         }
+    }
+
+    /// <summary>刷新 EXP 动画阶段的文字，包括跨级时的 LEVEL UP 提示。</summary>
+    private void RefreshExperienceLabel(bool finalFrame)
+    {
+        if (_experienceLabel is null || _experienceUnit is null)
+        {
+            return;
+        }
+
+        int displayedLevel = CurrentDisplayedLevel();
+        int displayedExperience = CurrentDisplayedExperience();
+        bool hasLeveled = displayedLevel > _experienceLevelBefore;
+
+        if (hasLeveled)
+        {
+            _experienceLabel.Text = finalFrame
+                ? $"LEVEL UP  Lv.{_experienceUnit.Level}  +{_experienceGained}"
+                : $"LEVEL UP  Lv.{displayedLevel}  {displayedExperience}/100";
+            _experienceLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.86f, 0.38f));
+        }
+        else
+        {
+            _experienceLabel.Text = finalFrame
+                ? $"EXP +{_experienceGained}   {_experienceUnit.Experience}/100"
+                : $"EXP +{_experienceGained}   {displayedExperience}/100";
+            _experienceLabel.AddThemeColorOverride("font_color", new Color(0.94f, 0.91f, 0.82f));
+        }
+    }
+
+    /// <summary>直接设置 EXP 文本并恢复普通颜色。</summary>
+    private void SetExperienceLabel(string text)
+    {
+        if (_experienceLabel is null)
+        {
+            return;
+        }
+
+        _experienceLabel.Text = text;
+        _experienceLabel.AddThemeColorOverride("font_color", new Color(0.94f, 0.91f, 0.82f));
     }
 
     /// <summary>绘制一条按当前生命比例缩放的硬边 HP 条。</summary>
@@ -359,6 +504,24 @@ public partial class RetroBattleStatusHudControl : Control
         }
 
         return new Color(0.28f, 0.72f, 0.32f, 1.0f);
+    }
+
+    /// <summary>把等级和当前 EXP 转换成可以连续动画的总经验值。</summary>
+    private static int ToTotalExperience(int level, int experience)
+    {
+        return Math.Max(0, level - 1) * 100 + Math.Clamp(experience, 0, 99);
+    }
+
+    /// <summary>返回当前 EXP 动画应该显示的等级。</summary>
+    private int CurrentDisplayedLevel()
+    {
+        return Math.Max(1, _animatedExperienceTotal / 100 + 1);
+    }
+
+    /// <summary>返回当前 EXP 动画应该显示的 0~99 EXP。</summary>
+    private int CurrentDisplayedExperience()
+    {
+        return Math.Clamp(_animatedExperienceTotal % 100, 0, 99);
     }
 
     /// <summary>
