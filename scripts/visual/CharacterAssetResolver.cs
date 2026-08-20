@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 定义人物美术在游戏中的使用槽位。
-/// 地图小人、人物头像和战斗演出分别使用独立素材，方便未来逐步替换而不是一次性完成全部美术。
+/// 地图小人、人物头像和战斗演出分别使用独立素材，方便逐步替换而不耦合战斗规则。
 /// </summary>
 public enum CharacterArtSlot
 {
@@ -16,19 +16,19 @@ public enum CharacterArtSlot
 
 /// <summary>
 /// 统一解析人物正式美术资源路径。
-/// 地图人物既支持旧版单张 map.png，也支持按状态/方向拆分的多帧像素动画。
+/// 地图人物支持方向序列帧；战斗演出支持攻击、施法、受击、闪避和倒下等独立序列帧。
 /// </summary>
 public static class CharacterAssetResolver
 {
     /// <summary>缓存已经成功加载的纹理，避免每帧重复读取 Godot ResourceLoader。</summary>
     private static readonly Dictionary<string, Texture2D> TextureCache = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>缓存某个状态/方向实际拥有的动画帧数。</summary>
+    /// <summary>缓存某个动画状态实际拥有的连续帧数。</summary>
     private static readonly Dictionary<string, int> FrameCountCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 尝试为指定人物和用途加载单张纹理。
-    /// 查找顺序为：人物实例 ID → 职业 ID → enemy_default/player_default；这样普通敌军不需要每个实例都准备一套素材。
+    /// 查找顺序为：人物实例 ID → 职业 ID → enemy_default/player_default。
     /// </summary>
     public static Texture2D? TryLoad(UnitModel unit, CharacterArtSlot slot)
     {
@@ -53,7 +53,7 @@ public static class CharacterAssetResolver
     {
         foreach (string key in CandidateKeys(unit))
         {
-            string cacheKey = $"{key}:{state}:{facing}";
+            string cacheKey = $"map:{key}:{state}:{facing}";
             if (FrameCountCache.TryGetValue(cacheKey, out int cachedCount))
             {
                 if (cachedCount > 0)
@@ -64,18 +64,7 @@ public static class CharacterAssetResolver
                 continue;
             }
 
-            int count = 0;
-            for (int frameIndex = 0; frameIndex < 16; frameIndex++)
-            {
-                string path = BuildMapFramePath(key, state, facing, frameIndex);
-                if (!ResourceLoader.Exists(path))
-                {
-                    break;
-                }
-
-                count++;
-            }
-
+            int count = CountContinuousFrames(index => BuildMapFramePath(key, state, facing, index));
             FrameCountCache[cacheKey] = count;
             if (count > 0)
             {
@@ -87,8 +76,7 @@ public static class CharacterAssetResolver
     }
 
     /// <summary>
-    /// 加载地图人物的一张序列帧。
-    /// 调用方应先用 GetMapFrameCount 确认该动画存在；缺失时返回 null 并继续使用单图或程序占位回退。
+    /// 加载地图人物的一张方向序列帧。
     /// </summary>
     public static Texture2D? TryLoadMapFrame(
         UnitModel unit,
@@ -107,6 +95,75 @@ public static class CharacterAssetResolver
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 获取独立战斗演出某个状态实际存在的连续帧数。
+    /// 战斗画面左右站位固定，因此这里不再要求四方向素材。
+    /// </summary>
+    public static int GetBattleFrameCount(UnitModel unit, CharacterAnimationState state)
+    {
+        foreach (string key in CandidateKeys(unit))
+        {
+            string cacheKey = $"battle:{key}:{state}";
+            if (FrameCountCache.TryGetValue(cacheKey, out int cachedCount))
+            {
+                if (cachedCount > 0)
+                {
+                    return cachedCount;
+                }
+
+                continue;
+            }
+
+            int count = CountContinuousFrames(index => BuildBattleFramePath(key, state, index));
+            FrameCountCache[cacheKey] = count;
+            if (count > 0)
+            {
+                return count;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// 加载独立战斗演出的一张序列帧。
+    /// 缺少对应状态时调用方可以回退到 battle.png、portrait.png 或程序绘制人物。
+    /// </summary>
+    public static Texture2D? TryLoadBattleFrame(UnitModel unit, CharacterAnimationState state, int frameIndex)
+    {
+        foreach (string key in CandidateKeys(unit))
+        {
+            string path = BuildBattleFramePath(key, state, Math.Max(0, frameIndex));
+            Texture2D? texture = TryLoadPath(path);
+            if (texture is not null)
+            {
+                return texture;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 扫描一组从 0 开始连续编号的帧，最多允许 24 帧。
+    /// 设定上限可避免错误目录造成无界资源检查。
+    /// </summary>
+    private static int CountContinuousFrames(Func<int, string> pathFactory)
+    {
+        int count = 0;
+        for (int frameIndex = 0; frameIndex < 24; frameIndex++)
+        {
+            if (!ResourceLoader.Exists(pathFactory(frameIndex)))
+            {
+                break;
+            }
+
+            count++;
+        }
+
+        return count;
     }
 
     /// <summary>
@@ -147,7 +204,6 @@ public static class CharacterAssetResolver
 
     /// <summary>
     /// 按统一目录约定构造单张人物资源路径。
-    /// 正式素材只需要放进 assets/characters/&lt;key&gt;/ 对应文件名即可被自动发现。
     /// </summary>
     private static string BuildPath(string key, CharacterArtSlot slot)
     {
@@ -163,7 +219,7 @@ public static class CharacterAssetResolver
     }
 
     /// <summary>
-    /// 构造地图序列帧路径。
+    /// 构造地图方向序列帧路径。
     /// 示例：res://assets/characters/adrian/map/walk_left_1.png。
     /// </summary>
     private static string BuildMapFramePath(
@@ -175,6 +231,16 @@ public static class CharacterAssetResolver
         string stateName = state.ToString().ToLowerInvariant();
         string facingName = facing.ToString().ToLowerInvariant();
         return $"res://assets/characters/{key}/map/{stateName}_{facingName}_{frameIndex}.png";
+    }
+
+    /// <summary>
+    /// 构造独立战斗演出序列帧路径。
+    /// 示例：res://assets/characters/adrian/battle/attack_2.png。
+    /// </summary>
+    private static string BuildBattleFramePath(string key, CharacterAnimationState state, int frameIndex)
+    {
+        string stateName = state.ToString().ToLowerInvariant();
+        return $"res://assets/characters/{key}/battle/{stateName}_{frameIndex}.png";
     }
 
     /// <summary>
