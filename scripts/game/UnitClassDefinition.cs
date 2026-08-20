@@ -32,10 +32,16 @@ public sealed class UnitClassDefinition
     /// <summary>该职业每回合可消耗的基础移动力。</summary>
     public int Move { get; }
 
-    /// <summary>职业允许的最小攻击距离。</summary>
+    /// <summary>
+    /// 职业层面的默认最小攻击距离。
+    /// 当前实际攻击距离由装备决定，该字段作为未来职业限制/无装备攻击的预留规则保留。
+    /// </summary>
     public int MinAttackRange { get; }
 
-    /// <summary>职业允许的最大攻击距离。</summary>
+    /// <summary>
+    /// 职业层面的默认最大攻击距离。
+    /// 当前实际攻击距离由装备决定，该字段作为未来职业限制/无装备攻击的预留规则保留。
+    /// </summary>
     public int MaxAttackRange { get; }
 }
 
@@ -48,12 +54,24 @@ public sealed class StatGrowthDefinition
     /// <summary>
     /// 创建角色成长率定义。
     /// </summary>
-    public StatGrowthDefinition(int hp, int strength, int defense, int speed)
+    public StatGrowthDefinition(
+        int hp,
+        int strength,
+        int magic,
+        int skill,
+        int speed,
+        int luck,
+        int defense,
+        int resistance)
     {
         Hp = hp;
         Strength = strength;
-        Defense = defense;
+        Magic = magic;
+        Skill = skill;
         Speed = speed;
+        Luck = luck;
+        Defense = defense;
+        Resistance = resistance;
     }
 
     /// <summary>生命成长率。</summary>
@@ -62,9 +80,21 @@ public sealed class StatGrowthDefinition
     /// <summary>力量成长率。</summary>
     public int Strength { get; }
 
+    /// <summary>魔力成长率。</summary>
+    public int Magic { get; }
+
+    /// <summary>技巧成长率，主要影响命中与必杀。</summary>
+    public int Skill { get; }
+
+    /// <summary>速度成长率，主要影响回避与追击。</summary>
+    public int Speed { get; }
+
+    /// <summary>幸运成长率，影响命中、回避以及抗必杀能力。</summary>
+    public int Luck { get; }
+
     /// <summary>防御成长率。</summary>
     public int Defense { get; }
 
-    /// <summary>速度成长率。</summary>
-    public int Speed { get; }
+    /// <summary>魔防成长率。</summary>
+    public int Resistance { get; }
 }
