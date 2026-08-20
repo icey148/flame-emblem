@@ -29,7 +29,7 @@ public sealed class CombatForecast
 }
 
 /// <summary>
-/// 集中管理战斗公式，避免伤害、距离、地形修正等规则散落在 UI 代码中。
+/// 集中管理战斗公式，避免伤害、距离、地形修正与经验规则散落在 UI 代码中。
 /// </summary>
 public static class CombatRules
 {
@@ -60,7 +60,7 @@ public static class CombatRules
         int totalDefense = defender.Defense + Mathf.Max(0, defenderTerrainDefenseBonus);
         int rawDamage = attacker.Strength + attacker.WeaponMight - totalDefense;
 
-        // 当前原型保持经典“至少造成 1 点伤害”的简化规则，避免完全无伤导致测试节奏停滞。
+        // 当前原型保持“至少造成 1 点伤害”的简化规则，避免完全无伤导致测试节奏停滞。
         return Mathf.Max(1, rawDamage);
     }
 
@@ -91,5 +91,17 @@ public static class CombatRules
         int damage = CalculateDamage(attacker, defender, defenderTerrainDefenseBonus);
         defender.TakeDamage(damage);
         return damage;
+    }
+
+    /// <summary>
+    /// 计算玩家攻击后获得的经验值。
+    /// 等级更高的目标奖励更多，击败目标会额外获得经验；结果限制在合理区间，避免原型数值失控。
+    /// </summary>
+    public static int CalculateExperienceGain(UnitModel attacker, UnitModel defender, bool defeatedDefender)
+    {
+        int levelDifference = defender.Level - attacker.Level;
+        int baseExperience = 12 + levelDifference * 2;
+        int defeatBonus = defeatedDefender ? 22 : 0;
+        return Mathf.Clamp(baseExperience + defeatBonus, 5, 60);
     }
 }
