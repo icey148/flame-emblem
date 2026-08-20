@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 在战棋地图上绘制 2D 人物小人，并负责把逻辑格移动表现成连续的逐格行走动画。
-/// 地图人物优先使用方向化多帧像素动画；素材不完整时依次回退到单张 map.png 和程序绘制人物。
+/// 地图人物优先使用方向化多帧像素动画；素材不完整时依次回退到单张 map.png 和原创复古像素职业模板。
 /// </summary>
 public partial class UnitCharacterLayer : Node2D
 {
@@ -55,6 +55,9 @@ public partial class UnitCharacterLayer : Node2D
     /// <summary>真正序列帧待机动画的默认播放速度。</summary>
     private const float IdleFramesPerSecond = 2.5f;
 
+    /// <summary>程序像素模板中一个逻辑像素对应的屏幕像素尺寸。</summary>
+    private const float PixelScale = 2.0f;
+
     /// <summary>
     /// 节点进入场景后使用最近邻纹理过滤。
     /// 这样低分辨率人物帧被放大时保持清晰像素边缘，不会被线性采样抹糊。
@@ -76,9 +79,7 @@ public partial class UnitCharacterLayer : Node2D
         QueueRedraw();
     }
 
-    /// <summary>
-    /// 绘制所有存活单位。
-    /// </summary>
+    /// <summary>绘制所有存活单位。</summary>
     public override void _Draw()
     {
         foreach (UnitModel unit in Units.Where(unit => unit.IsAlive))
@@ -148,7 +149,7 @@ public partial class UnitCharacterLayer : Node2D
 
     /// <summary>
     /// 绘制单个地图人物。
-    /// 有方向序列帧时真正切帧；没有多帧素材时继续兼容旧单图和程序占位模型。
+    /// 有方向序列帧时真正切帧；没有多帧素材时继续兼容旧单图和原创像素职业模板。
     /// </summary>
     private void DrawUnit(UnitModel unit)
     {
@@ -172,9 +173,15 @@ public partial class UnitCharacterLayer : Node2D
             teamColor = teamColor.Darkened(0.35f);
         }
 
-        // 阵营底圈跟随视觉位置移动，让逐格行走时人物不会与阵营标记脱离。
-        DrawCircle(visualCenter + new Vector2(0, 11), 20.0f, new Color(0.04f, 0.05f, 0.07f, 0.92f));
-        DrawCircle(visualCenter + new Vector2(0, 11), 20.5f, teamColor, false, 3.0f);
+        // 阵营标记改成扁平像素底座，不再使用大圆环，整体更接近复古战棋画面。
+        DrawRect(
+            new Rect2(visualCenter + new Vector2(-17, 20), new Vector2(34, 4)),
+            new Color(0.04f, 0.05f, 0.07f, 0.92f),
+            true);
+        DrawRect(
+            new Rect2(visualCenter + new Vector2(-14, 21), new Vector2(28, 2)),
+            teamColor,
+            true);
 
         if (animationFrame is not null)
         {
@@ -189,14 +196,16 @@ public partial class UnitCharacterLayer : Node2D
             }
             else
             {
-                DrawProceduralUnit(unit, characterCenter);
+                DrawProceduralPixelUnit(unit, characterCenter, facing, moving);
             }
         }
 
         if (ReferenceEquals(unit, SelectedUnit))
         {
-            // 选中单位增加金色外环；移动时外环也跟随人物走完整条路径。
-            DrawCircle(visualCenter + new Vector2(0, 11), 24.0f, new Color(1.0f, 0.84f, 0.25f), false, 2.5f);
+            // 选中单位使用四角像素框，不使用平滑圆形描边。
+            Color selection = new(1.0f, 0.84f, 0.25f);
+            Rect2 bounds = new(visualCenter + new Vector2(-22, -25), new Vector2(44, 50));
+            DrawPixelSelectionCorners(bounds, selection);
         }
     }
 
@@ -369,102 +378,173 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
-    /// 绘制无正式素材时使用的程序化小比例人物。
+    /// 在没有正式地图帧时绘制原创复古像素职业模板。
+    /// 模板由硬边矩形像素组成，不使用圆形/平滑线条；职业轮廓通过剑、枪、弓、法书区分。
     /// </summary>
-    private void DrawProceduralUnit(UnitModel unit, Vector2 center)
+    private void DrawProceduralPixelUnit(
+        UnitModel unit,
+        Vector2 center,
+        CharacterFacing facing,
+        bool moving)
     {
         CharacterAppearanceDefinition appearance = CharacterAppearanceCatalog.Get(unit);
+        Vector2 origin = center + new Vector2(-16, -20);
+        bool alternateStep = moving && ((int)Math.Floor(_elapsed * 10.0) % 2 == 1);
 
+        Color outline = new(0.08f, 0.07f, 0.08f);
+        Color shadow = appearance.OutfitColor.Darkened(0.32f);
+        Color highlight = appearance.OutfitColor.Lightened(0.18f);
+        Color metal = new(0.78f, 0.80f, 0.78f);
+        Color darkMetal = new(0.30f, 0.31f, 0.30f);
+
+        // 披风放在身体之后，保持角色主体轮廓干净。
         if (appearance.HasCape)
         {
-            Rect2 cape = new(center + new Vector2(-14, -1), new Vector2(28, 28));
-            DrawRect(cape, appearance.AccentColor.Darkened(0.18f), true);
+            DrawPixelBlock(origin, 4, 9, 8, 8, appearance.AccentColor.Darkened(0.24f));
+            DrawPixelBlock(origin, 5, 16, 6, 2, appearance.AccentColor.Darkened(0.36f));
         }
 
-        Rect2 body = new(center + new Vector2(-11, 2), new Vector2(22, 25));
-        DrawRect(body, appearance.OutfitColor, true);
-        DrawRect(body, appearance.AccentColor.Darkened(0.45f), false, 2.0f);
+        // 腿部用两帧交替，静止时保持并腿，移动时形成经典两步循环。
+        int leftLegX = alternateStep ? 5 : 6;
+        int rightLegX = alternateStep ? 10 : 9;
+        DrawPixelBlock(origin, leftLegX, 15, 2, 4, outline);
+        DrawPixelBlock(origin, rightLegX, 15, 2, 4, outline);
+        DrawPixelBlock(origin, leftLegX, 15, 2, 2, shadow);
+        DrawPixelBlock(origin, rightLegX, 15, 2, 2, shadow);
 
-        Vector2 headCenter = center + new Vector2(0, -8);
-        DrawCircle(headCenter, 10.0f, appearance.SkinColor);
-        DrawCircle(headCenter + new Vector2(0, -4), 10.5f, appearance.HairColor);
-        DrawRect(new Rect2(headCenter + new Vector2(-9, 0), new Vector2(18, 8)), appearance.SkinColor, true);
+        // 身体由深色外轮廓、主色和高光三层组成，模拟有限调色板像素角色。
+        DrawPixelBlock(origin, 4, 8, 8, 8, outline);
+        DrawPixelBlock(origin, 5, 8, 6, 7, appearance.OutfitColor);
+        DrawPixelBlock(origin, 5, 8, 2, 5, highlight);
+        DrawPixelBlock(origin, 9, 12, 2, 3, shadow);
+        DrawPixelBlock(origin, 5, 11, 6, 1, appearance.AccentColor);
 
-        DrawWeaponSilhouette(center, appearance);
+        // 头部只用矩形像素，不使用圆形；不同朝向通过脸部亮区和头发位置表现。
+        DrawPixelBlock(origin, 5, 2, 6, 6, outline);
+        DrawPixelBlock(origin, 6, 3, 4, 4, appearance.SkinColor);
+        DrawPixelBlock(origin, 5, 2, 6, 2, appearance.HairColor);
+        DrawPixelBlock(origin, 5, 4, 2, 3, appearance.HairColor.Darkened(0.08f));
+
+        if (facing == CharacterFacing.Up)
+        {
+            // 背面不绘制眼睛，并让头发覆盖更多区域。
+            DrawPixelBlock(origin, 7, 4, 3, 3, appearance.HairColor);
+        }
+        else
+        {
+            int eyeX = facing switch
+            {
+                CharacterFacing.Left => 6,
+                CharacterFacing.Right => 9,
+                _ => 7
+            };
+            DrawPixelBlock(origin, eyeX, 5, 1, 1, outline);
+        }
+
+        DrawPixelWeapon(origin, appearance, facing, metal, darkMetal);
 
         if (unit.HasActed)
         {
-            DrawRect(new Rect2(center + new Vector2(-16, -19), new Vector2(32, 48)), new Color(0.02f, 0.03f, 0.04f, 0.26f), true);
+            // 已行动时用棋盘式暗化而不是半透明大矩形，保留像素质感。
+            Color actedShade = new(0.02f, 0.03f, 0.04f, 0.34f);
+            for (int y = 2; y < 19; y += 2)
+            {
+                DrawPixelBlock(origin, 4, y, 9, 1, actedShade);
+            }
         }
     }
 
     /// <summary>
-    /// 单张 map.png 或程序占位人物没有真正帧动画时使用的视觉补偿。
+    /// 根据职业武器轮廓绘制地图像素武器。
+    /// 武器位置会跟随左右朝向翻转；上下方向使用较紧凑的正面/背面轮廓。
+    /// </summary>
+    private void DrawPixelWeapon(
+        Vector2 origin,
+        CharacterAppearanceDefinition appearance,
+        CharacterFacing facing,
+        Color metal,
+        Color darkMetal)
+    {
+        int side = facing == CharacterFacing.Left ? -1 : 1;
+        int anchorX = side < 0 ? 3 : 12;
+
+        switch (appearance.WeaponSilhouette)
+        {
+            case CharacterWeaponSilhouette.Spear:
+                // 枪兵用长直线像素轮廓，在地图上与剑士明显区分。
+                DrawPixelBlock(origin, anchorX, 4, 1, 13, darkMetal);
+                DrawPixelBlock(origin, anchorX, 2, 1, 3, metal);
+                DrawPixelBlock(origin, anchorX - 1, 2, 3, 1, metal);
+                break;
+
+            case CharacterWeaponSilhouette.Bow:
+                // 弓采用三段折线与弦，保持低分辨率也能读出形状。
+                DrawPixelBlock(origin, anchorX, 5, 1, 3, appearance.AccentColor.Darkened(0.18f));
+                DrawPixelBlock(origin, anchorX + side, 8, 1, 4, appearance.AccentColor.Darkened(0.18f));
+                DrawPixelBlock(origin, anchorX, 12, 1, 3, appearance.AccentColor.Darkened(0.18f));
+                DrawPixelBlock(origin, anchorX, 7, 1, 6, darkMetal);
+                break;
+
+            case CharacterWeaponSilhouette.Tome:
+                // 法书靠近胸前，旁边增加一颗强调色魔力像素。
+                DrawPixelBlock(origin, anchorX - (side < 0 ? 1 : 0), 10, 2, 3, outline: darkMetal);
+                DrawPixelBlock(origin, anchorX - (side < 0 ? 1 : 0), 10, 1, 2, appearance.AccentColor);
+                DrawPixelBlock(origin, anchorX + side, 8, 1, 1, appearance.AccentColor.Lightened(0.28f));
+                break;
+
+            default:
+                // 剑士使用短而宽的亮刃，避免和枪的长直轮廓混淆。
+                DrawPixelBlock(origin, anchorX, 6, 1, 8, darkMetal);
+                DrawPixelBlock(origin, anchorX, 4, 1, 4, metal);
+                DrawPixelBlock(origin, anchorX - 1, 8, 3, 1, appearance.AccentColor.Darkened(0.20f));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 绘制一个逻辑像素矩形。
+    /// 所有程序人物都通过这个方法落到整数网格，避免出现抗锯齿或半像素边缘。
+    /// </summary>
+    private void DrawPixelBlock(Vector2 origin, int x, int y, int width, int height, Color color)
+    {
+        DrawRect(
+            new Rect2(
+                origin + new Vector2(x * PixelScale, y * PixelScale),
+                new Vector2(width * PixelScale, height * PixelScale)),
+            color,
+            true);
+    }
+
+    /// <summary>绘制选中人物四个角的像素框。</summary>
+    private void DrawPixelSelectionCorners(Rect2 bounds, Color color)
+    {
+        const float corner = 7.0f;
+        const float thickness = 2.0f;
+
+        DrawRect(new Rect2(bounds.Position, new Vector2(corner, thickness)), color, true);
+        DrawRect(new Rect2(bounds.Position, new Vector2(thickness, corner)), color, true);
+        DrawRect(new Rect2(new Vector2(bounds.End.X - corner, bounds.Position.Y), new Vector2(corner, thickness)), color, true);
+        DrawRect(new Rect2(new Vector2(bounds.End.X - thickness, bounds.Position.Y), new Vector2(thickness, corner)), color, true);
+        DrawRect(new Rect2(new Vector2(bounds.Position.X, bounds.End.Y - thickness), new Vector2(corner, thickness)), color, true);
+        DrawRect(new Rect2(new Vector2(bounds.Position.X, bounds.End.Y - corner), new Vector2(thickness, corner)), color, true);
+        DrawRect(new Rect2(new Vector2(bounds.End.X - corner, bounds.End.Y - thickness), new Vector2(corner, thickness)), color, true);
+        DrawRect(new Rect2(new Vector2(bounds.End.X - thickness, bounds.End.Y - corner), new Vector2(thickness, corner)), color, true);
+    }
+
+    /// <summary>
+    /// 单张 map.png 或程序像素模板没有真正帧动画时使用的视觉补偿。
     /// 真正序列帧存在时不会再额外上下晃动，避免出现“切帧同时漂浮”的重复动画。
     /// </summary>
     private Vector2 AnimationOffset(UnitModel unit)
     {
         if (_motions.ContainsKey(unit.Id))
         {
-            float walkBob = Mathf.Abs(Mathf.Sin((float)_elapsed * 22.0f)) * 3.0f;
-            return new Vector2(0, -walkBob);
+            // 程序像素模板只做整数像素级起伏，避免产生平滑漂浮感。
+            int step = ((int)Math.Floor(_elapsed * 12.0) % 2 == 0) ? 0 : 2;
+            return new Vector2(0, -step);
         }
 
-        if (unit.HasActed)
-        {
-            return Vector2.Zero;
-        }
-
-        float phase = StableVisualPhase(unit.Id);
-        bool selected = ReferenceEquals(unit, SelectedUnit);
-        float speed = selected ? 6.0f : 3.2f;
-        float amplitude = selected ? 2.2f : 1.0f;
-        float y = Mathf.Sin((float)_elapsed * speed + phase) * amplitude;
-        return new Vector2(0, y);
-    }
-
-    /// <summary>
-    /// 根据人物 ID 生成稳定视觉相位，避免所有单位同时上下移动。
-    /// </summary>
-    private static float StableVisualPhase(string id)
-    {
-        int sum = 0;
-        foreach (char character in id)
-        {
-            sum += character;
-        }
-
-        return (sum % 31) * 0.17f;
-    }
-
-    /// <summary>
-    /// 根据职业/武器类型绘制不同的简化武器轮廓。
-    /// </summary>
-    private void DrawWeaponSilhouette(Vector2 center, CharacterAppearanceDefinition appearance)
-    {
-        Color weaponColor = new(0.88f, 0.88f, 0.90f);
-        Color darkWeaponColor = new(0.28f, 0.24f, 0.20f);
-
-        switch (appearance.WeaponSilhouette)
-        {
-            case CharacterWeaponSilhouette.Spear:
-                DrawLine(center + new Vector2(12, 20), center + new Vector2(24, -17), darkWeaponColor, 4.0f);
-                DrawLine(center + new Vector2(23, -16), center + new Vector2(27, -23), weaponColor, 3.0f);
-                break;
-            case CharacterWeaponSilhouette.Bow:
-                DrawLine(center + new Vector2(15, -11), center + new Vector2(21, 21), darkWeaponColor, 3.0f);
-                DrawLine(center + new Vector2(15, -11), center + new Vector2(26, 5), appearance.AccentColor, 2.0f);
-                DrawLine(center + new Vector2(26, 5), center + new Vector2(21, 21), appearance.AccentColor, 2.0f);
-                break;
-            case CharacterWeaponSilhouette.Tome:
-                DrawRect(new Rect2(center + new Vector2(13, 6), new Vector2(13, 17)), appearance.AccentColor, true);
-                DrawCircle(center + new Vector2(19.5f, 14.5f), 3.0f, new Color(0.92f, 0.72f, 1.0f));
-                break;
-            default:
-                DrawLine(center + new Vector2(13, 19), center + new Vector2(23, -14), darkWeaponColor, 5.0f);
-                DrawLine(center + new Vector2(22, -13), center + new Vector2(26, -21), weaponColor, 4.0f);
-                break;
-        }
+        return Vector2.Zero;
     }
 
     /// <summary>获取指定格地形；未配置的格子默认是平地。</summary>
@@ -488,9 +568,7 @@ public partial class UnitCharacterLayer : Node2D
         yield return Vector2I.Right;
     }
 
-    /// <summary>
-    /// 把逻辑格坐标转换为当前地图格子的像素中心。
-    /// </summary>
+    /// <summary>把逻辑格坐标转换为当前地图格子的像素中心。</summary>
     private Vector2 GridCenter(Vector2I cell)
     {
         return BoardOrigin + new Vector2(
