@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3]
+
+; Main scene for the first playable tactical-RPG prototype.
+; Gameplay nodes and HUD controls are created by MainGame.cs so the prototype
+; can run without depending on external art assets.
+
+[ext_resource type="Script" path="res://scripts/main/MainGame.cs" id="1_main"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
