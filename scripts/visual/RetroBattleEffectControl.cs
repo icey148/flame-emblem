@@ -32,14 +32,20 @@ public partial class RetroBattleEffectControl : Control
 
     /// <summary>
     /// 初始化战斗舞台。
-    /// 使用负 ZIndex 把背景与特效放到人物后方，人物轮廓因此不会被程序特效遮住。
+    /// 把本控件移到 stage 的第一个子节点，使背景稳定绘制在人物和 HUD 后方，同时仍位于战斗面板内部。
     /// </summary>
     public override void _Ready()
     {
         MouseFilter = MouseFilterEnum.Ignore;
         TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
-        ZIndex = -10;
         Visible = true;
+
+        Node? parent = GetParent();
+        if (parent is not null && GetIndex() != 0)
+        {
+            parent.MoveChild(this, 0);
+        }
+
         QueueRedraw();
     }
 
@@ -107,7 +113,7 @@ public partial class RetroBattleEffectControl : Control
 
     /// <summary>
     /// 绘制原创的古典战棋横向战斗舞台。
-    /// 视觉语言使用低饱和天空、远山、旧城墙、草地与石质前景，保持战争中的索菲亚式乡野氛围，但不复制任何原作背景。
+    /// 视觉语言使用低饱和天空、远山、旧城墙、草地与石质前景，保持战争中的古典乡野氛围，但不复制任何原作背景。
     /// </summary>
     private void DrawBattleStage()
     {
