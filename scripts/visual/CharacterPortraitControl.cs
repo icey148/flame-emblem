@@ -4,8 +4,8 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// HUD 中使用的程序化角色头像/半身像控件。
-/// 当前用于验证人物详情 UI 的空间和结构；以后换成正式立绘时只需要替换这个控件的绘制实现。
+/// HUD 中使用的人物头像/半身像控件。
+/// 正式 portrait.png 存在时优先显示正式立绘；缺少素材时自动退回程序绘制占位头像。
 /// </summary>
 public partial class CharacterPortraitControl : Control
 {
@@ -22,7 +22,7 @@ public partial class CharacterPortraitControl : Control
     }
 
     /// <summary>
-    /// 绘制当前人物的头像/半身占位形象。
+    /// 绘制当前人物头像。
     /// </summary>
     public override void _Draw()
     {
@@ -32,15 +32,39 @@ public partial class CharacterPortraitControl : Control
 
         if (_unit is null)
         {
-            DrawCircle(new Vector2(Size.X * 0.5f, Size.Y * 0.38f), 16.0f, new Color(0.28f, 0.29f, 0.32f));
-            DrawRect(
-                new Rect2(new Vector2(Size.X * 0.28f, Size.Y * 0.58f), new Vector2(Size.X * 0.44f, Size.Y * 0.34f)),
-                new Color(0.24f, 0.25f, 0.28f),
-                true);
+            DrawEmptyPortrait();
             return;
         }
 
-        CharacterAppearanceDefinition appearance = CharacterAppearanceCatalog.Get(_unit);
+        Texture2D? portraitTexture = CharacterAssetResolver.TryLoad(_unit, CharacterArtSlot.Portrait);
+        if (portraitTexture is not null)
+        {
+            // 正式立绘使用控件完整区域，素材自身应带透明背景或已经完成构图裁切。
+            DrawTextureRect(portraitTexture, bounds, false);
+            return;
+        }
+
+        DrawProceduralPortrait(_unit);
+    }
+
+    /// <summary>
+    /// 没有选中人物时绘制中性占位轮廓。
+    /// </summary>
+    private void DrawEmptyPortrait()
+    {
+        DrawCircle(new Vector2(Size.X * 0.5f, Size.Y * 0.38f), 16.0f, new Color(0.28f, 0.29f, 0.32f));
+        DrawRect(
+            new Rect2(new Vector2(Size.X * 0.28f, Size.Y * 0.58f), new Vector2(Size.X * 0.44f, Size.Y * 0.34f)),
+            new Color(0.24f, 0.25f, 0.28f),
+            true);
+    }
+
+    /// <summary>
+    /// 在正式头像素材缺失时绘制程序化半身像。
+    /// </summary>
+    private void DrawProceduralPortrait(UnitModel unit)
+    {
+        CharacterAppearanceDefinition appearance = CharacterAppearanceCatalog.Get(unit);
         Vector2 headCenter = new(Size.X * 0.5f, Size.Y * 0.33f);
 
         if (appearance.HasCape)
@@ -67,7 +91,7 @@ public partial class CharacterPortraitControl : Control
             appearance.SkinColor,
             true);
 
-        // 用极简眼睛与服装饰边让占位头像具备“角色脸”而不是几何人偶感。
+        // 极简五官和服装饰边用于保持不同人物的可读性，不代表最终美术风格。
         DrawCircle(headCenter + new Vector2(-Size.X * 0.065f, Size.Y * 0.035f), 2.2f, new Color(0.12f, 0.10f, 0.10f));
         DrawCircle(headCenter + new Vector2(Size.X * 0.065f, Size.Y * 0.035f), 2.2f, new Color(0.12f, 0.10f, 0.10f));
         DrawRect(
