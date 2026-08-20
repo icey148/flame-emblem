@@ -6,12 +6,15 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 在玩家单位完成移动后显示明确的行动菜单。
-/// 这个过渡层只负责交互提示与按钮，不修改战斗公式；攻击和等待仍然调用 MainGame 现有逻辑。
+/// 菜单会等待人物逐格行走动画结束后再出现，避免“人物还在走、行动按钮已经弹出”的割裂感。
 /// </summary>
 public partial class PostMoveActionCoordinator : Node
 {
     /// <summary>当前战斗主节点。</summary>
     private Node? _battleHost;
+
+    /// <summary>人物表现协调器，用于判断逐格移动动画是否结束。</summary>
+    private CharacterVisualCoordinator? _visualCoordinator;
 
     /// <summary>MainGame 当前选中单位字段。</summary>
     private FieldInfo? _selectedUnitField;
@@ -59,6 +62,8 @@ public partial class PostMoveActionCoordinator : Node
             return;
         }
 
+        _visualCoordinator = GetNodeOrNull<CharacterVisualCoordinator>("../CharacterVisualCoordinator");
+
         Type hostType = _battleHost.GetType();
         BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
         _selectedUnitField = hostType.GetField("_selectedUnit", fields);
@@ -84,19 +89,21 @@ public partial class PostMoveActionCoordinator : Node
     }
 
     /// <summary>
-    /// 每帧检查单位是否已经完成移动，并在需要时显示行动菜单。
+    /// 每帧检查单位是否已经完成移动，并在人物走到目标格后显示行动菜单。
     /// </summary>
     public override void _Process(double delta)
     {
         UnitModel? selectedUnit = ReadSelectedUnit();
         bool hasMoved = ReadSelectedUnitHasMoved();
         UnitModel? pendingTarget = ReadPendingTarget();
+        bool movementAnimating = _visualCoordinator?.IsMovementAnimating ?? false;
 
-        // 只有“我方单位已移动且尚未锁定攻击目标”时显示菜单。
+        // 行动菜单必须等视觉行走结束后才出现；这样“移动 → 到达 → 行动”的节奏清晰连续。
         bool shouldShow = selectedUnit is { Team: UnitTeam.Player } &&
                           hasMoved &&
                           pendingTarget is null &&
-                          !selectedUnit.HasActed;
+                          !selectedUnit.HasActed &&
+                          !movementAnimating;
 
         if (_panel is not null)
         {
@@ -183,8 +190,8 @@ public partial class PostMoveActionCoordinator : Node
         if (_messageLabel is not null)
         {
             _messageLabel.Text = targets.Count > 0
-                ? $"{selectedUnit.DisplayName} 已移动。\n射程内有 {targets.Count} 个敌人。"
-                : $"{selectedUnit.DisplayName} 已移动。\n当前射程内没有敌人。";
+                ? $"{selectedUnit.DisplayName} 已到达。\n射程内有 {targets.Count} 个敌人。"
+                : $"{selectedUnit.DisplayName} 已到达。\n当前射程内没有敌人。";
         }
 
         if (_attackButton is not null)
@@ -205,7 +212,8 @@ public partial class PostMoveActionCoordinator : Node
     /// </summary>
     private void OnAttackPressed()
     {
-        if (_battleHost is null || _setPendingAttackTargetMethod is null)
+        if (_battleHost is null || _setPendingAttackTargetMethod is null ||
+            (_visualCoordinator?.IsMovementAnimating ?? false))
         {
             return;
         }
@@ -234,7 +242,8 @@ public partial class PostMoveActionCoordinator : Node
     /// </summary>
     private void OnWaitPressed()
     {
-        if (_battleHost is null || _waitMethod is null)
+        if (_battleHost is null || _waitMethod is null ||
+            (_visualCoordinator?.IsMovementAnimating ?? false))
         {
             return;
         }
