@@ -1,0 +1,53 @@
+{
+  "classes": [
+    {
+      "id": "vanguard",
+      "name": "先锋",
+      "move": 5,
+      "min_attack_range": 1,
+      "max_attack_range": 1
+    },
+    {
+      "id": "scout",
+      "name": "游骑兵",
+      "move": 6,
+      "min_attack_range": 1,
+      "max_attack_range": 1
+    },
+    {
+      "id": "soldier",
+      "name": "士兵",
+      "move": 4,
+      "min_attack_range": 1,
+      "max_attack_range": 1
+    },
+    {
+      "id": "mage",
+      "name": "术士",
+      "move": 5,
+      "min_attack_range": 1,
+      "max_attack_range": 2
+    },
+    {
+      "id": "raider",
+      "name": "掠夺者",
+      "move": 4,
+      "min_attack_range": 1,
+      "max_attack_range": 1
+    },
+    {
+      "id": "guard",
+      "name": "守卫",
+      "move": 3,
+      "min_attack_range": 1,
+      "max_attack_range": 1
+    },
+    {
+      "id": "captain",
+      "name": "桥头队长",
+      "move": 3,
+      "min_attack_range": 1,
+      "max_attack_range": 1
+    }
+  ]
+}
