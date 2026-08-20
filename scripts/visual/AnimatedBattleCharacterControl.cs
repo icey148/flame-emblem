@@ -183,7 +183,8 @@ public partial class AnimatedBattleCharacterControl : Control
         skin.A *= opacity;
         accent.A *= opacity;
 
-        Vector2 center = new(Size.X * 0.5f, Size.Y * 0.42f) + offset;
+        // 显式写出 Vector2 类型，避免 target-typed new 在二元加法中无法推断操作数类型。
+        Vector2 center = new Vector2(Size.X * 0.5f, Size.Y * 0.42f) + offset;
         DrawRect(new Rect2(center + new Vector2(-46, 26), new Vector2(92, 92)), outfit, true);
         DrawCircle(center, 34.0f, skin);
         DrawCircle(center + new Vector2(0, -15), 36.0f, hair);
