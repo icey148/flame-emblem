@@ -76,31 +76,116 @@ public partial class BattleCharacterArtControl : Control
 
         if (appearance.HasCape)
         {
+            // 披风先画在职业本体后方，避免覆盖肩甲、长袍边缘等识别轮廓。
             DrawPixel(origin, 7, 15, 15, 16, accent.Darkened(0.24f));
         }
 
-        DrawPixel(origin, 10, 28, 4, 9, outline);
-        DrawPixel(origin, 17, 28, 4, 9, outline);
-        DrawPixel(origin, 10, 28, 3, 6, shadow);
-        DrawPixel(origin, 17, 28, 3, 6, shadow);
-        DrawPixel(origin, 8, 35, 7, 3, darkMetal);
-        DrawPixel(origin, 16, 35, 7, 3, darkMetal);
+        DrawPreviewBody(origin, appearance, outline, outfit, shadow, light, accent, darkMetal);
 
-        DrawPixel(origin, 8, 13, 14, 17, outline);
-        DrawPixel(origin, 9, 14, 12, 15, outfit);
-        DrawPixel(origin, 9, 14, 4, 11, light);
-        DrawPixel(origin, 18, 20, 3, 9, shadow);
-        DrawPixel(origin, 8, 24, 14, 3, accent);
-
+        // 头部所有职业共用同一低分辨率比例，职业差异主要留给身体、袖口和装备。
         DrawPixel(origin, 10, 4, 10, 10, outline);
         DrawPixel(origin, 11, 5, 8, 8, skin);
         DrawPixel(origin, 9, 3, 11, 4, hair);
         DrawPixel(origin, side > 0 ? 10 : 17, 6, 3, 6, hair.Darkened(0.22f));
         DrawPixel(origin, side > 0 ? 17 : 11, 9, 1, 1, outline);
 
-        DrawPixel(origin, side > 0 ? 22 : 5, 17, 3, 8, shadow);
-        DrawPixel(origin, side > 0 ? 5 : 22, 17, 3, 8, shadow);
+        DrawPreviewArms(origin, appearance, side, shadow);
         DrawPreviewWeapon(origin, appearance, side, accent, metal, darkMetal);
+    }
+
+    /// <summary>
+    /// 根据轻装、重甲、长袍三种身体模板绘制预览职业体型。
+    /// 三种模板刻意改变肩宽、腿部和下摆，而不是只改颜色。
+    /// </summary>
+    private void DrawPreviewBody(
+        Vector2 origin,
+        CharacterAppearanceDefinition appearance,
+        Color outline,
+        Color outfit,
+        Color shadow,
+        Color light,
+        Color accent,
+        Color darkMetal)
+    {
+        switch (appearance.BodySilhouette)
+        {
+            case CharacterBodySilhouette.Armored:
+                // 重甲：厚肩甲、宽胸甲、分离腿甲和更大的金属靴。
+                DrawPixel(origin, 6, 12, 18, 18, outline);
+                DrawPixel(origin, 8, 14, 14, 15, outfit);
+                DrawPixel(origin, 5, 13, 5, 6, darkMetal);
+                DrawPixel(origin, 21, 13, 5, 6, darkMetal);
+                DrawPixel(origin, 8, 15, 4, 10, light);
+                DrawPixel(origin, 19, 19, 3, 10, shadow);
+                DrawPixel(origin, 7, 22, 16, 3, accent);
+                DrawPixel(origin, 8, 28, 5, 9, outline);
+                DrawPixel(origin, 18, 28, 5, 9, outline);
+                DrawPixel(origin, 9, 28, 4, 7, shadow);
+                DrawPixel(origin, 18, 28, 4, 7, shadow);
+                DrawPixel(origin, 6, 35, 8, 3, darkMetal);
+                DrawPixel(origin, 17, 35, 8, 3, darkMetal);
+                break;
+
+            case CharacterBodySilhouette.Robed:
+                // 长袍：上身较窄，下摆逐渐展开，脚部只露出少量深色鞋尖。
+                DrawPixel(origin, 8, 13, 14, 13, outline);
+                DrawPixel(origin, 9, 14, 12, 11, outfit);
+                DrawPixel(origin, 9, 14, 4, 8, light);
+                DrawPixel(origin, 18, 18, 3, 7, shadow);
+                DrawPixel(origin, 8, 22, 14, 3, accent);
+                DrawPixel(origin, 7, 25, 16, 11, outline);
+                DrawPixel(origin, 8, 25, 14, 10, outfit);
+                DrawPixel(origin, 8, 25, 4, 8, light.Darkened(0.06f));
+                DrawPixel(origin, 19, 27, 3, 8, shadow);
+                DrawPixel(origin, 8, 34, 5, 3, darkMetal);
+                DrawPixel(origin, 18, 34, 5, 3, darkMetal);
+                break;
+
+            default:
+                // 轻装：窄肩、短上衣、两条清晰分开的腿，突出灵活感。
+                DrawPixel(origin, 8, 13, 14, 17, outline);
+                DrawPixel(origin, 9, 14, 12, 15, outfit);
+                DrawPixel(origin, 9, 14, 4, 11, light);
+                DrawPixel(origin, 18, 20, 3, 9, shadow);
+                DrawPixel(origin, 8, 24, 14, 3, accent);
+                DrawPixel(origin, 10, 28, 4, 9, outline);
+                DrawPixel(origin, 17, 28, 4, 9, outline);
+                DrawPixel(origin, 10, 28, 3, 6, shadow);
+                DrawPixel(origin, 17, 28, 3, 6, shadow);
+                DrawPixel(origin, 8, 35, 7, 3, darkMetal);
+                DrawPixel(origin, 16, 35, 7, 3, darkMetal);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 根据身体模板绘制待机手臂。
+    /// 重甲使用厚护臂，长袍使用宽袖，轻装保持细窄手臂。
+    /// </summary>
+    private void DrawPreviewArms(
+        Vector2 origin,
+        CharacterAppearanceDefinition appearance,
+        int side,
+        Color shadow)
+    {
+        int frontX = side > 0 ? 22 : 5;
+        int backX = side > 0 ? 5 : 22;
+
+        switch (appearance.BodySilhouette)
+        {
+            case CharacterBodySilhouette.Armored:
+                DrawPixel(origin, frontX, 17, 4, 9, shadow);
+                DrawPixel(origin, backX - 1, 17, 4, 9, shadow);
+                break;
+            case CharacterBodySilhouette.Robed:
+                DrawPixel(origin, frontX - 1, 16, 5, 10, shadow);
+                DrawPixel(origin, backX - 1, 16, 5, 10, shadow);
+                break;
+            default:
+                DrawPixel(origin, frontX, 17, 3, 8, shadow);
+                DrawPixel(origin, backX, 17, 3, 8, shadow);
+                break;
+        }
     }
 
     /// <summary>按职业绘制预览中的武器/法书。</summary>
