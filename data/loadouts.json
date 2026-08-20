@@ -1,0 +1,8 @@
+{
+  "loadouts": [
+    { "unit_id": "adrian", "weapon_ids": ["iron_sword", "training_sword"] },
+    { "unit_id": "celine", "weapon_ids": ["short_bow", "long_bow"] },
+    { "unit_id": "rowan", "weapon_ids": ["iron_spear", "javelin"] },
+    { "unit_id": "mira", "weapon_ids": ["ember", "thunder"] }
+  ]
+}
