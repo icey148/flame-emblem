@@ -1,0 +1,88 @@
+{
+  "units": [
+    {
+      "id": "adrian",
+      "name": "Adrian",
+      "class_id": "vanguard",
+      "level": 1,
+      "max_hp": 24,
+      "strength": 8,
+      "defense": 5,
+      "speed": 7,
+      "weapon_might": 4,
+      "growth": { "hp": 75, "strength": 50, "defense": 35, "speed": 45 }
+    },
+    {
+      "id": "celine",
+      "name": "Celine",
+      "class_id": "scout",
+      "level": 1,
+      "max_hp": 20,
+      "strength": 7,
+      "defense": 4,
+      "speed": 9,
+      "weapon_might": 3,
+      "growth": { "hp": 60, "strength": 40, "defense": 25, "speed": 65 }
+    },
+    {
+      "id": "rowan",
+      "name": "Rowan",
+      "class_id": "soldier",
+      "level": 2,
+      "max_hp": 27,
+      "strength": 9,
+      "defense": 6,
+      "speed": 5,
+      "weapon_might": 4,
+      "growth": { "hp": 80, "strength": 55, "defense": 50, "speed": 25 }
+    },
+    {
+      "id": "mira",
+      "name": "Mira",
+      "class_id": "mage",
+      "level": 1,
+      "max_hp": 19,
+      "strength": 6,
+      "defense": 3,
+      "speed": 8,
+      "weapon_might": 5,
+      "growth": { "hp": 50, "strength": 60, "defense": 20, "speed": 55 }
+    },
+    {
+      "id": "raider",
+      "name": "Raider",
+      "class_id": "raider",
+      "level": 1,
+      "max_hp": 18,
+      "strength": 6,
+      "defense": 3,
+      "speed": 5,
+      "weapon_might": 3,
+      "growth": { "hp": 0, "strength": 0, "defense": 0, "speed": 0 }
+    },
+    {
+      "id": "guard",
+      "name": "Guard",
+      "class_id": "guard",
+      "level": 2,
+      "max_hp": 22,
+      "strength": 7,
+      "defense": 5,
+      "speed": 3,
+      "weapon_might": 4,
+      "growth": { "hp": 0, "strength": 0, "defense": 0, "speed": 0 }
+    },
+    {
+      "id": "bridge_captain",
+      "name": "Bridge Captain",
+      "class_id": "captain",
+      "level": 4,
+      "max_hp": 28,
+      "strength": 9,
+      "defense": 6,
+      "speed": 6,
+      "weapon_might": 5,
+      "growth": { "hp": 0, "strength": 0, "defense": 0, "speed": 0 }
+    }
+  ]
+}
