@@ -6,7 +6,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 把人物地图小人、人物详情、装备切换、完整详情页和战斗演出预览挂到现有 MainGame 场景上。
-/// 当前主战斗场景尚未暴露只读 BattleView 接口，因此这个过渡层只在启动时通过反射缓存必要字段；后续重构主场景 API 后会移除反射。
+/// 当前主战斗场景尚未暴露只读 BattleView 接口，因此这个过渡层在启动时通过反射缓存必要字段；后续重构主场景 API 后会移除反射。
 /// </summary>
 public partial class CharacterVisualCoordinator : Node
 {
@@ -21,6 +21,15 @@ public partial class CharacterVisualCoordinator : Node
 
     /// <summary>MainGame 中当前锁定攻击目标字段的缓存反射信息。</summary>
     private FieldInfo? _pendingAttackTargetField;
+
+    /// <summary>MainGame 当前章节地形字典字段。</summary>
+    private FieldInfo? _terrainField;
+
+    /// <summary>MainGame 当前地图宽度字段。</summary>
+    private FieldInfo? _gridWidthField;
+
+    /// <summary>MainGame 当前地图高度字段。</summary>
+    private FieldInfo? _gridHeightField;
 
     /// <summary>地图上的人物小人层。</summary>
     private UnitCharacterLayer? _unitCharacterLayer;
@@ -49,8 +58,14 @@ public partial class CharacterVisualCoordinator : Node
     /// <summary>锁定攻击目标时显示的独立战斗演出预览层。</summary>
     private BattleDuelPreviewControl? _duelPreview;
 
+    /// <summary>人物移动动画期间覆盖全屏、吞掉鼠标点击的透明输入层。</summary>
+    private ColorRect? _movementInputShield;
+
     /// <summary>上一次面板状态签名，用于避免无意义地每帧刷新文字。</summary>
     private string _lastPanelState = string.Empty;
+
+    /// <summary>当前是否正在播放至少一个地图人物移动动画。</summary>
+    public bool IsMovementAnimating => _unitCharacterLayer?.IsMovementAnimating ?? false;
 
     /// <summary>
     /// 节点进入场景树时缓存战斗主节点字段，并创建人物表现层。
@@ -66,13 +81,18 @@ public partial class CharacterVisualCoordinator : Node
         }
 
         Type hostType = _battleHost.GetType();
-        _unitsField = hostType.GetField("_units", BindingFlags.Instance | BindingFlags.NonPublic);
-        _selectedUnitField = hostType.GetField("_selectedUnit", BindingFlags.Instance | BindingFlags.NonPublic);
-        _pendingAttackTargetField = hostType.GetField("_pendingAttackTarget", BindingFlags.Instance | BindingFlags.NonPublic);
+        BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+        _unitsField = hostType.GetField("_units", fields);
+        _selectedUnitField = hostType.GetField("_selectedUnit", fields);
+        _pendingAttackTargetField = hostType.GetField("_pendingAttackTarget", fields);
+        _terrainField = hostType.GetField("_terrain", fields);
+        _gridWidthField = hostType.GetField("_gridWidth", fields);
+        _gridHeightField = hostType.GetField("_gridHeight", fields);
 
-        if (_unitsField is null || _selectedUnitField is null || _pendingAttackTargetField is null)
+        if (_unitsField is null || _selectedUnitField is null || _pendingAttackTargetField is null ||
+            _terrainField is null || _gridWidthField is null || _gridHeightField is null)
         {
-            GD.PushWarning("CharacterVisualCoordinator 无法读取 MainGame 的人物状态字段。请在重构 MainGame 时同步更新人物表现接口。");
+            GD.PushWarning("CharacterVisualCoordinator 无法读取 MainGame 的人物/地图状态字段。请在重构 MainGame 时同步更新人物表现接口。");
             SetProcess(false);
             return;
         }
@@ -81,10 +101,11 @@ public partial class CharacterVisualCoordinator : Node
         CreateBattleDuelPreview();
         CreateCharacterDetailsPanel();
         CreateCharacterDetailOverlay();
+        CreateMovementInputShield();
     }
 
     /// <summary>
-    /// 每帧读取当前战斗人物状态并同步纯表现层。
+    /// 每帧读取当前战斗人物/地图状态并同步纯表现层。
     /// 反射 FieldInfo 已在 _Ready 缓存，因此不会每帧重新查找字段定义。
     /// </summary>
     public override void _Process(double delta)
@@ -97,10 +118,19 @@ public partial class CharacterVisualCoordinator : Node
         {
             _unitCharacterLayer.Units = units;
             _unitCharacterLayer.SelectedUnit = selectedUnit;
+            _unitCharacterLayer.Terrain = ReadTerrain();
+            _unitCharacterLayer.GridWidth = ReadGridWidth();
+            _unitCharacterLayer.GridHeight = ReadGridHeight();
         }
 
         _duelPreview?.SetCombatants(selectedUnit, pendingTarget);
         RefreshDetailsPanel(selectedUnit, pendingTarget);
+
+        if (_movementInputShield is not null)
+        {
+            // 人物逐格行走期间吞掉新的地图点击，避免玩家在动画未结束时继续下达指令。
+            _movementInputShield.Visible = IsMovementAnimating;
+        }
     }
 
     /// <summary>
@@ -230,6 +260,29 @@ public partial class CharacterVisualCoordinator : Node
     }
 
     /// <summary>
+    /// 创建移动期间的透明输入遮罩。
+    /// 遮罩不改变画面，只负责让鼠标事件先被 GUI 消耗，从而不会继续进入 MainGame._UnhandledInput。
+    /// </summary>
+    private void CreateMovementInputShield()
+    {
+        CanvasLayer shieldLayer = new()
+        {
+            Layer = 100
+        };
+        AddChild(shieldLayer);
+
+        _movementInputShield = new ColorRect
+        {
+            Position = Vector2.Zero,
+            Size = GetViewport().GetVisibleRect().Size,
+            Color = new Color(0, 0, 0, 0),
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            Visible = false
+        };
+        shieldLayer.AddChild(_movementInputShield);
+    }
+
+    /// <summary>
     /// 读取主战斗节点的单位集合；读取失败时返回空集合，避免表现层影响游戏运行。
     /// </summary>
     private IReadOnlyList<UnitModel> ReadUnits()
@@ -241,6 +294,34 @@ public partial class CharacterVisualCoordinator : Node
 
         return _unitsField.GetValue(_battleHost) as IReadOnlyList<UnitModel>
                ?? Array.Empty<UnitModel>();
+    }
+
+    /// <summary>读取当前章节地形表。</summary>
+    private IReadOnlyDictionary<Vector2I, TerrainType> ReadTerrain()
+    {
+        if (_battleHost is null || _terrainField is null)
+        {
+            return new Dictionary<Vector2I, TerrainType>();
+        }
+
+        return _terrainField.GetValue(_battleHost) as IReadOnlyDictionary<Vector2I, TerrainType>
+               ?? new Dictionary<Vector2I, TerrainType>();
+    }
+
+    /// <summary>读取当前地图宽度。</summary>
+    private int ReadGridWidth()
+    {
+        return _battleHost is not null && _gridWidthField?.GetValue(_battleHost) is int width
+            ? width
+            : 15;
+    }
+
+    /// <summary>读取当前地图高度。</summary>
+    private int ReadGridHeight()
+    {
+        return _battleHost is not null && _gridHeightField?.GetValue(_battleHost) is int height
+            ? height
+            : 10;
     }
 
     /// <summary>
@@ -265,13 +346,13 @@ public partial class CharacterVisualCoordinator : Node
 
     /// <summary>
     /// 循环切换当前玩家单位的备用装备。
-    /// 已经锁定攻击目标时禁止切换，保证主 HUD 的预测数值不会与实际装备产生短暂不一致。
+    /// 已经锁定攻击目标或正在移动时禁止切换，保证预测数值与动画状态一致。
     /// </summary>
     private void OnCycleEquipmentPressed()
     {
         UnitModel? unit = ReadSelectedUnit();
         UnitModel? pendingTarget = ReadPendingAttackTarget();
-        if (unit is null || unit.Team != UnitTeam.Player || pendingTarget is not null)
+        if (unit is null || unit.Team != UnitTeam.Player || pendingTarget is not null || IsMovementAnimating)
         {
             return;
         }
@@ -279,7 +360,6 @@ public partial class CharacterVisualCoordinator : Node
         UnitLoadoutCatalog.CycleNext(unit);
         _lastPanelState = string.Empty;
 
-        // 装备射程变化会影响地图攻击范围，因此要求主 Canvas 重新绘制。
         if (_battleHost is CanvasItem canvasItem)
         {
             canvasItem.QueueRedraw();
@@ -292,7 +372,7 @@ public partial class CharacterVisualCoordinator : Node
     private void OnOpenDetailsPressed()
     {
         UnitModel? unit = ReadSelectedUnit();
-        if (unit is null)
+        if (unit is null || IsMovementAnimating)
         {
             return;
         }
@@ -305,7 +385,7 @@ public partial class CharacterVisualCoordinator : Node
     /// </summary>
     private void RefreshDetailsPanel(UnitModel? unit, UnitModel? pendingTarget)
     {
-        string state = BuildPanelState(unit, pendingTarget);
+        string state = BuildPanelState(unit, pendingTarget) + $":moving={IsMovementAnimating}";
         if (state == _lastPanelState)
         {
             return;
@@ -345,10 +425,11 @@ public partial class CharacterVisualCoordinator : Node
             $"威力 {equipped.Might} 命中 {equipped.Hit} 必杀 {equipped.Critical}" +
             (equipped.HpCost > 0 ? $" HP消耗 {equipped.HpCost}" : string.Empty);
 
-        bool canCycle = unit.Team == UnitTeam.Player && available.Count > 1 && pendingTarget is null && !unit.HasActed;
+        bool canCycle = unit.Team == UnitTeam.Player && available.Count > 1 && pendingTarget is null &&
+                        !unit.HasActed && !IsMovementAnimating;
         _cycleEquipmentButton.Disabled = !canCycle;
-        _cycleEquipmentButton.Text = pendingTarget is not null ? "已锁定目标" : "切换装备";
-        _openDetailsButton.Disabled = false;
+        _cycleEquipmentButton.Text = pendingTarget is not null ? "已锁定目标" : IsMovementAnimating ? "移动中" : "切换装备";
+        _openDetailsButton.Disabled = IsMovementAnimating;
     }
 
     /// <summary>
