@@ -5,15 +5,15 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 战斗演出层的第一版骨架。
-/// 当前在玩家锁定攻击目标时展示左右人物位、头像、装备和 HP；以后攻击动画、受击动画、魔法特效都在这个控件内部扩展。
+/// 当前在玩家锁定攻击目标时展示左右人物位、装备和 HP；以后攻击、受击、闪避和魔法动画都在这个控件内部扩展。
 /// </summary>
 public partial class BattleDuelPreviewControl : Control
 {
-    /// <summary>左侧主动攻击者头像。</summary>
-    private CharacterPortraitControl? _attackerPortrait;
+    /// <summary>左侧主动攻击者战斗人物图。</summary>
+    private BattleCharacterArtControl? _attackerArt;
 
-    /// <summary>右侧防守者头像。</summary>
-    private CharacterPortraitControl? _defenderPortrait;
+    /// <summary>右侧防守者战斗人物图。</summary>
+    private BattleCharacterArtControl? _defenderArt;
 
     /// <summary>左侧人物信息。</summary>
     private Label? _attackerLabel;
@@ -57,11 +57,11 @@ public partial class BattleDuelPreviewControl : Control
         };
         row.AddChild(attackerColumn);
 
-        _attackerPortrait = new CharacterPortraitControl
+        _attackerArt = new BattleCharacterArtControl
         {
             CustomMinimumSize = new Vector2(190, 160)
         };
-        attackerColumn.AddChild(_attackerPortrait);
+        attackerColumn.AddChild(_attackerArt);
 
         _attackerLabel = new Label
         {
@@ -98,11 +98,11 @@ public partial class BattleDuelPreviewControl : Control
         };
         row.AddChild(defenderColumn);
 
-        _defenderPortrait = new CharacterPortraitControl
+        _defenderArt = new BattleCharacterArtControl
         {
             CustomMinimumSize = new Vector2(190, 160)
         };
-        defenderColumn.AddChild(_defenderPortrait);
+        defenderColumn.AddChild(_defenderArt);
 
         _defenderLabel = new Label
         {
@@ -121,13 +121,14 @@ public partial class BattleDuelPreviewControl : Control
         _defender = defender;
         Visible = attacker is not null && defender is not null;
 
-        _attackerPortrait?.SetUnit(attacker);
-        _defenderPortrait?.SetUnit(defender);
+        _attackerArt?.SetUnit(attacker);
+        _defenderArt?.SetUnit(defender);
         RefreshLabels();
     }
 
     /// <summary>
-    /// 让左右人物位产生轻微错相呼吸动画，建立后续正式战斗动画状态机的基础。
+    /// 让左右人物位产生轻微错相呼吸缩放，建立正式战斗动画状态机的基础。
+    /// 使用 Scale 而不是 Position，避免父级 Container 在布局时覆盖动画位移。
     /// </summary>
     public override void _Process(double delta)
     {
@@ -137,14 +138,18 @@ public partial class BattleDuelPreviewControl : Control
         }
 
         _elapsed += delta;
-        if (_attackerPortrait is not null)
+        if (_attackerArt is not null)
         {
-            _attackerPortrait.Position = new Vector2(0, Mathf.Sin((float)_elapsed * 4.2f) * 2.0f);
+            _attackerArt.PivotOffset = _attackerArt.Size * 0.5f;
+            float scale = 1.0f + Mathf.Sin((float)_elapsed * 4.2f) * 0.012f;
+            _attackerArt.Scale = new Vector2(scale, scale);
         }
 
-        if (_defenderPortrait is not null)
+        if (_defenderArt is not null)
         {
-            _defenderPortrait.Position = new Vector2(0, Mathf.Sin((float)_elapsed * 4.2f + 1.7f) * 2.0f);
+            _defenderArt.PivotOffset = _defenderArt.Size * 0.5f;
+            float scale = 1.0f + Mathf.Sin((float)_elapsed * 4.2f + 1.7f) * 0.012f;
+            _defenderArt.Scale = new Vector2(scale, scale);
         }
     }
 
