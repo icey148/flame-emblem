@@ -1,0 +1,16 @@
+# Godot generates this directory locally; it should never be committed.
+.godot/
+
+# .NET build output is reproducible and should stay out of source control.
+bin/
+obj/
+
+# IDE-specific local settings are not part of the game source.
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Operating-system metadata has no value in the repository.
+.DS_Store
+Thumbs.db
