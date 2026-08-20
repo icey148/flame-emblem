@@ -5,8 +5,8 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 在玩家单位完成移动后显示明确的行动菜单。
-/// 菜单会等待人物逐格行走动画结束后再出现，避免“人物还在走、行动按钮已经弹出”的割裂感。
+/// 为当前选中的玩家单位显示明确的行动菜单。
+/// 单位不需要先移动：如果原地已有敌人在攻击范围内，可以直接攻击；移动后仍会等待行走动画结束再显示菜单。
 /// </summary>
 public partial class PostMoveActionCoordinator : Node
 {
@@ -34,7 +34,7 @@ public partial class PostMoveActionCoordinator : Node
     /// <summary>MainGame 等待按钮对应的私有方法。</summary>
     private MethodInfo? _waitMethod;
 
-    /// <summary>移动结束后显示的浮动面板。</summary>
+    /// <summary>当前单位行动菜单。</summary>
     private PanelContainer? _panel;
 
     /// <summary>提示当前可以执行什么行动。</summary>
@@ -50,14 +50,14 @@ public partial class PostMoveActionCoordinator : Node
     private string _lastState = string.Empty;
 
     /// <summary>
-    /// 缓存 MainGame 所需成员并创建移动后行动菜单。
+    /// 缓存 MainGame 所需成员并创建行动菜单。
     /// </summary>
     public override void _Ready()
     {
         _battleHost = GetParent();
         if (_battleHost is null)
         {
-            GD.PushWarning("PostMoveActionCoordinator 找不到战斗主节点。移动后行动菜单不会启动。");
+            GD.PushWarning("PostMoveActionCoordinator 找不到战斗主节点。行动菜单不会启动。");
             SetProcess(false);
             return;
         }
@@ -65,13 +65,13 @@ public partial class PostMoveActionCoordinator : Node
         _visualCoordinator = GetNodeOrNull<CharacterVisualCoordinator>("../CharacterVisualCoordinator");
 
         Type hostType = _battleHost.GetType();
-        BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
-        _selectedUnitField = hostType.GetField("_selectedUnit", fields);
-        _selectedUnitHasMovedField = hostType.GetField("_selectedUnitHasMoved", fields);
-        _pendingAttackTargetField = hostType.GetField("_pendingAttackTarget", fields);
-        _unitsField = hostType.GetField("_units", fields);
-        _setPendingAttackTargetMethod = hostType.GetMethod("SetPendingAttackTarget", fields);
-        _waitMethod = hostType.GetMethod("OnWaitPressed", fields);
+        BindingFlags members = BindingFlags.Instance | BindingFlags.NonPublic;
+        _selectedUnitField = hostType.GetField("_selectedUnit", members);
+        _selectedUnitHasMovedField = hostType.GetField("_selectedUnitHasMoved", members);
+        _pendingAttackTargetField = hostType.GetField("_pendingAttackTarget", members);
+        _unitsField = hostType.GetField("_units", members);
+        _setPendingAttackTargetMethod = hostType.GetMethod("SetPendingAttackTarget", members);
+        _waitMethod = hostType.GetMethod("OnWaitPressed", members);
 
         if (_selectedUnitField is null ||
             _selectedUnitHasMovedField is null ||
@@ -80,7 +80,7 @@ public partial class PostMoveActionCoordinator : Node
             _setPendingAttackTargetMethod is null ||
             _waitMethod is null)
         {
-            GD.PushWarning("PostMoveActionCoordinator 无法读取 MainGame 的移动后状态。请同步检查字段/方法名称。");
+            GD.PushWarning("PostMoveActionCoordinator 无法读取 MainGame 的行动状态。请同步检查字段/方法名称。");
             SetProcess(false);
             return;
         }
@@ -89,7 +89,8 @@ public partial class PostMoveActionCoordinator : Node
     }
 
     /// <summary>
-    /// 每帧检查单位是否已经完成移动，并在人物走到目标格后显示行动菜单。
+    /// 每帧检查当前选中单位并显示行动菜单。
+    /// 原地选择后立即可行动；发生移动时则等人物真正走到目标格以后再恢复菜单。
     /// </summary>
     public override void _Process(double delta)
     {
@@ -98,12 +99,11 @@ public partial class PostMoveActionCoordinator : Node
         UnitModel? pendingTarget = ReadPendingTarget();
         bool movementAnimating = _visualCoordinator?.IsMovementAnimating ?? false;
 
-        // 行动菜单必须等视觉行走结束后才出现；这样“移动 → 到达 → 行动”的节奏清晰连续。
         bool shouldShow = selectedUnit is { Team: UnitTeam.Player } &&
-                          hasMoved &&
                           pendingTarget is null &&
                           !selectedUnit.HasActed &&
-                          !movementAnimating;
+                          !movementAnimating &&
+                          !BattleAnimationBus.IsPlaybackActive;
 
         if (_panel is not null)
         {
@@ -117,18 +117,19 @@ public partial class PostMoveActionCoordinator : Node
         }
 
         IReadOnlyList<UnitModel> targets = FindAttackableTargets(selectedUnit);
-        string state = $"{selectedUnit.Id}:{selectedUnit.GridPosition}:{selectedUnit.EquippedWeapon.Id}:{targets.Count}";
+        string state =
+            $"{selectedUnit.Id}:{selectedUnit.GridPosition}:{selectedUnit.EquippedWeapon.Id}:{hasMoved}:{targets.Count}";
         if (state == _lastState)
         {
             return;
         }
 
         _lastState = state;
-        RefreshPanel(selectedUnit, targets);
+        RefreshPanel(selectedUnit, targets, hasMoved);
     }
 
     /// <summary>
-    /// 创建地图右下方的移动后行动菜单。
+    /// 创建地图右下方的行动菜单。
     /// </summary>
     private void CreatePanel()
     {
@@ -141,7 +142,7 @@ public partial class PostMoveActionCoordinator : Node
         _panel = new PanelContainer
         {
             Position = new Vector2(610, 430),
-            Size = new Vector2(210, 145),
+            Size = new Vector2(220, 155),
             Visible = false
         };
         layer.AddChild(_panel);
@@ -162,7 +163,7 @@ public partial class PostMoveActionCoordinator : Node
         _messageLabel = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(190, 55),
+            CustomMinimumSize = new Vector2(200, 62),
             HorizontalAlignment = HorizontalAlignment.Center
         };
         column.AddChild(_messageLabel);
@@ -183,15 +184,25 @@ public partial class PostMoveActionCoordinator : Node
     }
 
     /// <summary>
-    /// 根据当前可攻击敌人数刷新提示和按钮状态。
+    /// 根据当前是否移动以及可攻击敌人数刷新提示。
+    /// 原地有目标时明确告诉玩家“可以直接攻击”，避免误以为移动是攻击前置条件。
     /// </summary>
-    private void RefreshPanel(UnitModel selectedUnit, IReadOnlyList<UnitModel> targets)
+    private void RefreshPanel(UnitModel selectedUnit, IReadOnlyList<UnitModel> targets, bool hasMoved)
     {
         if (_messageLabel is not null)
         {
-            _messageLabel.Text = targets.Count > 0
-                ? $"{selectedUnit.DisplayName} 已到达。\n射程内有 {targets.Count} 个敌人。"
-                : $"{selectedUnit.DisplayName} 已到达。\n当前射程内没有敌人。";
+            if (hasMoved)
+            {
+                _messageLabel.Text = targets.Count > 0
+                    ? $"{selectedUnit.DisplayName} 已到达。\n射程内有 {targets.Count} 个敌人。"
+                    : $"{selectedUnit.DisplayName} 已到达。\n当前射程内没有敌人。";
+            }
+            else
+            {
+                _messageLabel.Text = targets.Count > 0
+                    ? $"当前即可攻击 {targets.Count} 个敌人。\n也可以先选择蓝色格移动。"
+                    : "当前没有攻击目标。\n可以移动，或原地等待。";
+            }
         }
 
         if (_attackButton is not null)
@@ -207,13 +218,15 @@ public partial class PostMoveActionCoordinator : Node
     }
 
     /// <summary>
-    /// 点击攻击按钮时自动锁定距离最近的一个可攻击敌人。
-    /// 玩家仍然可以直接点击地图上的红色敌人选择具体目标。
+    /// 点击攻击按钮时自动锁定距离最近的可攻击敌人。
+    /// 无论单位是否移动过都可以调用；玩家仍然可以直接点击地图上的敌军选择具体目标。
     /// </summary>
     private void OnAttackPressed()
     {
-        if (_battleHost is null || _setPendingAttackTargetMethod is null ||
-            (_visualCoordinator?.IsMovementAnimating ?? false))
+        if (_battleHost is null ||
+            _setPendingAttackTargetMethod is null ||
+            (_visualCoordinator?.IsMovementAnimating ?? false) ||
+            BattleAnimationBus.IsPlaybackActive)
         {
             return;
         }
@@ -238,12 +251,15 @@ public partial class PostMoveActionCoordinator : Node
     }
 
     /// <summary>
-    /// 点击等待按钮时复用 MainGame 原有等待逻辑，正常结束当前单位行动。
+    /// 点击等待按钮时复用 MainGame 原有等待逻辑。
+    /// 因此原地不移动也可以直接结束当前单位行动，这是标准战棋操作的一部分。
     /// </summary>
     private void OnWaitPressed()
     {
-        if (_battleHost is null || _waitMethod is null ||
-            (_visualCoordinator?.IsMovementAnimating ?? false))
+        if (_battleHost is null ||
+            _waitMethod is null ||
+            (_visualCoordinator?.IsMovementAnimating ?? false) ||
+            BattleAnimationBus.IsPlaybackActive)
         {
             return;
         }
@@ -257,7 +273,9 @@ public partial class PostMoveActionCoordinator : Node
     private IReadOnlyList<UnitModel> FindAttackableTargets(UnitModel selectedUnit)
     {
         return ReadUnits()
-            .Where(unit => unit.IsAlive && unit.Team == UnitTeam.Enemy && CombatRules.CanAttack(selectedUnit, unit))
+            .Where(unit => unit.IsAlive &&
+                           unit.Team == UnitTeam.Enemy &&
+                           CombatRules.CanAttack(selectedUnit, unit))
             .ToList();
     }
 
