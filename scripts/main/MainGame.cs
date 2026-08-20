@@ -5,7 +5,7 @@ namespace FlameEmblem.Main;
 
 /// <summary>
 /// 当前可运行的战棋主场景。
-/// 该节点负责地图绘制、玩家交互与回合推进，职业、地形、战斗公式和章节数据均委托给独立模块。
+/// 该节点只负责地图交互、回合推进和 HUD；职业、地形、装备与战斗公式均委托给独立游戏规则模块。
 /// </summary>
 public partial class MainGame : Node2D
 {
@@ -33,7 +33,7 @@ public partial class MainGame : Node2D
     /// <summary>当前章节的非平地地形覆盖表。</summary>
     private readonly Dictionary<Vector2I, TerrainType> _terrain = new();
 
-    /// <summary>当前战斗中的全部单位，包括已经倒下但仍保留在集合中的单位。</summary>
+    /// <summary>当前战斗中的全部单位，包括已倒下但仍保留在集合中的单位。</summary>
     private readonly List<UnitModel> _units = new();
 
     /// <summary>当前选中的玩家单位；为空表示等待玩家选择。</summary>
@@ -42,26 +42,35 @@ public partial class MainGame : Node2D
     /// <summary>当前战斗预测对应的敌军目标。</summary>
     private UnitModel? _pendingAttackTarget;
 
-    /// <summary>当前选中单位是否已经完成了本回合移动。</summary>
+    /// <summary>当前选中单位是否已经完成本回合移动。</summary>
     private bool _selectedUnitHasMoved;
 
     /// <summary>当前选中单位可移动到的格子集合。</summary>
     private HashSet<Vector2I> _reachableCells = new();
 
-    /// <summary>HUD 标题文本。</summary>
+    /// <summary>战斗命中与必杀使用的本地随机数生成器。</summary>
+    private readonly Random _combatRandom = new();
+
+    /// <summary>最近一次完整战斗交换的表现文本。</summary>
+    private string _lastBattleLog = "尚未发生战斗。";
+
+    /// <summary>HUD 章节标题。</summary>
     private Label? _titleLabel;
 
     /// <summary>HUD 顶部状态文本。</summary>
     private Label? _statusLabel;
-
-    /// <summary>HUD 单位列表文本。</summary>
-    private Label? _unitListLabel;
 
     /// <summary>HUD 当前地形信息。</summary>
     private Label? _terrainLabel;
 
     /// <summary>HUD 战斗预测信息。</summary>
     private Label? _forecastLabel;
+
+    /// <summary>HUD 最近一次战斗的逐击记录。</summary>
+    private Label? _battleLogLabel;
+
+    /// <summary>HUD 单位列表文本。</summary>
+    private Label? _unitListLabel;
 
     /// <summary>确认当前战斗预测并执行攻击的按钮。</summary>
     private Button? _confirmAttackButton;
@@ -82,7 +91,7 @@ public partial class MainGame : Node2D
     private BattlePhase _phase = BattlePhase.Player;
 
     /// <summary>
-    /// Godot 节点进入场景树后创建 HUD，并从 JSON 加载第一张正式测试关卡。
+    /// Godot 节点进入场景树后创建 HUD，并从 JSON 加载第一张测试关卡。
     /// </summary>
     public override void _Ready()
     {
@@ -91,7 +100,7 @@ public partial class MainGame : Node2D
         try
         {
             LoadChapter();
-            UpdateHud("选择一个蓝色单位开始行动。移动后选择攻击范围内的敌军即可查看战斗预测。");
+            UpdateHud("选择一个蓝色单位开始行动。移动后选择攻击范围内的敌军即可查看完整战斗预测。");
         }
         catch (Exception exception)
         {
@@ -167,7 +176,7 @@ public partial class MainGame : Node2D
 
     /// <summary>
     /// 通过 Godot 控件动态创建右侧 HUD。
-    /// 后续 UI 稳定后再拆成独立 .tscn 场景，当前保持工程最小可运行依赖。
+    /// 后续美术稳定后会拆成独立 .tscn；当前保持工程最小可运行依赖。
     /// </summary>
     private void CreateHud()
     {
@@ -176,8 +185,8 @@ public partial class MainGame : Node2D
 
         PanelContainer panel = new()
         {
-            Position = new Vector2(850, 45),
-            Size = new Vector2(390, 635)
+            Position = new Vector2(850, 25),
+            Size = new Vector2(400, 670)
         };
         canvasLayer.AddChild(panel);
 
@@ -194,28 +203,35 @@ public partial class MainGame : Node2D
         _statusLabel = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(350, 85)
+            CustomMinimumSize = new Vector2(360, 72)
         };
         column.AddChild(_statusLabel);
 
         _terrainLabel = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(350, 45)
+            CustomMinimumSize = new Vector2(360, 42)
         };
         column.AddChild(_terrainLabel);
 
         _forecastLabel = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(350, 105)
+            CustomMinimumSize = new Vector2(360, 110)
         };
         column.AddChild(_forecastLabel);
+
+        _battleLogLabel = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            CustomMinimumSize = new Vector2(360, 105)
+        };
+        column.AddChild(_battleLogLabel);
 
         _unitListLabel = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(350, 210)
+            CustomMinimumSize = new Vector2(360, 150)
         };
         column.AddChild(_unitListLabel);
 
@@ -250,10 +266,15 @@ public partial class MainGame : Node2D
             return;
         }
 
-        // 点击攻击范围内的敌军只进入“预测”状态，不立即结算伤害。
-        if (clickedUnit is { Team: UnitTeam.Enemy } enemy &&
-            CombatRules.IsInAttackRange(_selectedUnit, enemy))
+        // 点击敌军时先验证装备使用条件，再进入预测状态。
+        if (clickedUnit is { Team: UnitTeam.Enemy } enemy && CombatRules.IsInAttackRange(_selectedUnit, enemy))
         {
+            if (!_selectedUnit.CanUseEquippedWeapon)
+            {
+                UpdateHud($"{_selectedUnit.DisplayName} 当前 HP 不足，无法使用 {_selectedUnit.EquippedWeapon.DisplayName}。");
+                return;
+            }
+
             SetPendingAttackTarget(enemy);
             return;
         }
@@ -300,7 +321,9 @@ public partial class MainGame : Node2D
         _pendingAttackTarget = null;
         _selectedUnitHasMoved = false;
         RefreshSelectedMovementRange();
-        UpdateHud($"已选择 {unit.DisplayName}（{unit.ClassDefinition.DisplayName}）。蓝色区域为可移动范围。");
+        UpdateHud(
+            $"已选择 {unit.DisplayName}（{unit.ClassDefinition.DisplayName}）。" +
+            $"装备：{unit.EquippedWeapon.DisplayName}。蓝色区域为可移动范围。");
         QueueRedraw();
     }
 
@@ -309,13 +332,13 @@ public partial class MainGame : Node2D
     /// </summary>
     private void SetPendingAttackTarget(UnitModel enemy)
     {
-        if (_selectedUnit is null || !CombatRules.IsInAttackRange(_selectedUnit, enemy))
+        if (_selectedUnit is null || !CombatRules.CanAttack(_selectedUnit, enemy))
         {
             return;
         }
 
         _pendingAttackTarget = enemy;
-        UpdateHud($"已锁定 {enemy.DisplayName}。确认预测无误后点击“确认攻击”。");
+        UpdateHud($"已锁定 {enemy.DisplayName}。确认预测后点击“确认攻击”。");
         QueueRedraw();
     }
 
@@ -384,17 +407,16 @@ public partial class MainGame : Node2D
     }
 
     /// <summary>
-    /// 玩家确认战斗预测后执行攻击、可能的反击、经验获取和升级。
+    /// 玩家确认预测后执行带命中、必杀、反击、追击与魔法 HP 消耗的完整战斗交换。
     /// </summary>
     private void OnConfirmAttackPressed()
     {
         if (_phase != BattlePhase.Player ||
             _selectedUnit is null ||
             _pendingAttackTarget is null ||
-            !_pendingAttackTarget.IsAlive ||
-            !CombatRules.IsInAttackRange(_selectedUnit, _pendingAttackTarget))
+            !CombatRules.CanAttack(_selectedUnit, _pendingAttackTarget))
         {
-            UpdateHud("当前没有可以确认的攻击目标。");
+            UpdateHud("当前没有可以确认的攻击目标，或装备已经无法使用。");
             return;
         }
 
@@ -402,24 +424,24 @@ public partial class MainGame : Node2D
         UnitModel defender = _pendingAttackTarget;
         TerrainDefinition attackerTerrain = TerrainRules.Get(TerrainAt(attacker.GridPosition));
         TerrainDefinition defenderTerrain = TerrainRules.Get(TerrainAt(defender.GridPosition));
-        CombatForecast forecast = CombatRules.CreateForecast(
+
+        CombatExchangeResult exchange = CombatResolver.ResolveExchange(
             attacker,
             defender,
-            attackerTerrain.DefenseBonus,
-            defenderTerrain.DefenseBonus);
+            attackerTerrain,
+            defenderTerrain,
+            _combatRandom);
 
-        int damage = CombatRules.ResolveAttack(attacker, defender, defenderTerrain.DefenseBonus);
+        _lastBattleLog = BattlePresentationFormatter.FormatExchange(exchange);
         bool defenderDefeated = !defender.IsAlive;
-        string result = $"{attacker.DisplayName} 对 {defender.DisplayName} 造成 {damage} 点伤害。";
+        string result = _lastBattleLog;
 
-        // 只有预测确认目标能存活并具备射程时才会发生反击，确保实际结算与预测一致。
-        if (!defenderDefeated && forecast.DefenderCanCounter)
+        // 主动发起战斗的玩家单位获得一次战斗经验；击倒目标时按现有经验公式追加奖励。
+        if (exchange.Strikes.Any(strike => ReferenceEquals(strike.Attacker, attacker)))
         {
-            int counterDamage = CombatRules.ResolveAttack(defender, attacker, attackerTerrain.DefenseBonus);
-            result += $" {defender.DisplayName} 反击造成 {counterDamage} 点伤害。";
+            result += GrantCombatExperience(attacker, defender, defenderDefeated);
         }
 
-        result += GrantCombatExperience(attacker, defender, defenderDefeated);
         FinishSelectedUnitAction(result);
     }
 
@@ -497,7 +519,7 @@ public partial class MainGame : Node2D
 
     /// <summary>
     /// 执行一整个规则驱动的敌军回合。
-    /// 每个敌人寻找最近玩家、按地形移动到更近位置，并在进入射程后执行一次攻击交换。
+    /// 敌军只使用固定目标选择/移动规则；战斗中的命中和必杀属于普通游戏随机数，不是生成式 AI。
     /// </summary>
     private void RunEnemyTurn()
     {
@@ -508,7 +530,7 @@ public partial class MainGame : Node2D
 
         _phase = BattlePhase.Enemy;
         ClearSelection();
-        List<string> turnLog = new() { "敌军按照固定规则行动；游戏没有使用 LLM 或生成式 AI。" };
+        List<string> turnLog = new();
 
         foreach (UnitModel enemy in _units.Where(unit => unit.IsAlive && unit.Team == UnitTeam.Enemy).ToList())
         {
@@ -518,7 +540,7 @@ public partial class MainGame : Node2D
                 break;
             }
 
-            // 如果当前位置不能攻击，就先在自己的可达范围中选择更接近目标的格子。
+            // 如果当前位置不在射程内，就先在可达范围中选择更接近目标的格子。
             if (!CombatRules.IsInAttackRange(enemy, target))
             {
                 HashSet<Vector2I> reachable = CalculateReachableCells(enemy);
@@ -526,26 +548,26 @@ public partial class MainGame : Node2D
                 enemy.GridPosition = destination;
             }
 
-            if (target.IsAlive && CombatRules.IsInAttackRange(enemy, target))
+            if (CombatRules.CanAttack(enemy, target))
             {
                 TerrainDefinition enemyTerrain = TerrainRules.Get(TerrainAt(enemy.GridPosition));
                 TerrainDefinition targetTerrain = TerrainRules.Get(TerrainAt(target.GridPosition));
-                CombatForecast forecast = CombatRules.CreateForecast(
+                CombatExchangeResult exchange = CombatResolver.ResolveExchange(
                     enemy,
                     target,
-                    enemyTerrain.DefenseBonus,
-                    targetTerrain.DefenseBonus);
+                    enemyTerrain,
+                    targetTerrain,
+                    _combatRandom);
 
-                int damage = CombatRules.ResolveAttack(enemy, target, targetTerrain.DefenseBonus);
-                turnLog.Add($"{enemy.DisplayName} 攻击 {target.DisplayName}，造成 {damage} 点伤害。");
+                string exchangeText = BattlePresentationFormatter.FormatExchange(exchange);
+                turnLog.Add(exchangeText);
+                _lastBattleLog = exchangeText;
 
-                // 玩家单位作为防守方也可以正常反击，而且反击造成伤害后同样获得经验。
-                if (target.IsAlive && forecast.DefenderCanCounter)
+                // 玩家作为防守方只要实际完成了至少一次反击，也可以获得经验与击倒奖励。
+                if (exchange.Strikes.Any(strike => ReferenceEquals(strike.Attacker, target)))
                 {
-                    int counterDamage = CombatRules.ResolveAttack(target, enemy, enemyTerrain.DefenseBonus);
                     bool enemyDefeated = !enemy.IsAlive;
-                    turnLog.Add($"{target.DisplayName} 反击，造成 {counterDamage} 点伤害。" +
-                                GrantCombatExperience(target, enemy, enemyDefeated));
+                    turnLog.Add(GrantCombatExperience(target, enemy, enemyDefeated).Trim());
                 }
             }
 
@@ -561,7 +583,10 @@ public partial class MainGame : Node2D
             return;
         }
 
-        StartNextPlayerTurn(string.Join("\n", turnLog));
+        string previousEnemyTurnLog = turnLog.Count == 0
+            ? "敌军本回合没有发生有效战斗。"
+            : string.Join("\n", turnLog);
+        StartNextPlayerTurn(previousEnemyTurnLog);
     }
 
     /// <summary>
@@ -576,7 +601,7 @@ public partial class MainGame : Node2D
 
         int gainedExperience = CombatRules.CalculateExperienceGain(attacker, defender, defenderDefeated);
         IReadOnlyList<LevelUpResult> levelUps = attacker.GainExperience(gainedExperience);
-        string text = $" {attacker.DisplayName} 获得 {gainedExperience} EXP。";
+        string text = $"\n{attacker.DisplayName} 获得 {gainedExperience} EXP。";
 
         foreach (LevelUpResult levelUp in levelUps)
         {
@@ -625,7 +650,8 @@ public partial class MainGame : Node2D
         bool playerHasWon;
         if (_victoryCondition.Equals("defeat_target", StringComparison.OrdinalIgnoreCase))
         {
-            UnitModel? target = _units.FirstOrDefault(unit => unit.Id.Equals(_victoryTargetId, StringComparison.OrdinalIgnoreCase));
+            UnitModel? target = _units.FirstOrDefault(unit =>
+                unit.Id.Equals(_victoryTargetId, StringComparison.OrdinalIgnoreCase));
             playerHasWon = target is not null && !target.IsAlive;
         }
         else
@@ -638,7 +664,7 @@ public partial class MainGame : Node2D
         {
             _phase = BattlePhase.Victory;
             ClearSelection();
-            UpdateHud($"胜利：{_chapterTitle} 的主要目标已经完成。当前第一关数据驱动战斗结束。");
+            UpdateHud($"胜利：{_chapterTitle} 的主要目标已经完成。");
             QueueRedraw();
         }
     }
@@ -655,7 +681,7 @@ public partial class MainGame : Node2D
     }
 
     /// <summary>
-    /// 刷新 HUD 的章节、状态、地形、战斗预测和单位信息。
+    /// 刷新 HUD 的章节、状态、地形、战斗预测、战斗记录和单位信息。
     /// </summary>
     private void UpdateHud(string message)
     {
@@ -674,6 +700,7 @@ public partial class MainGame : Node2D
 
         UpdateTerrainHud();
         UpdateForecastHud();
+        UpdateBattleLogHud();
         UpdateUnitListHud();
         UpdateActionButtons();
     }
@@ -696,11 +723,13 @@ public partial class MainGame : Node2D
 
         TerrainDefinition terrain = TerrainRules.Get(TerrainAt(_selectedUnit.GridPosition));
         string passableText = terrain.Passable ? "可通行" : "不可通行";
-        _terrainLabel.Text = $"地形：{terrain.DisplayName} | 移动消耗 {terrain.MoveCost} | 防御 +{terrain.DefenseBonus} | 回避 +{terrain.AvoidBonus} | {passableText}";
+        _terrainLabel.Text =
+            $"地形：{terrain.DisplayName} | 移动 {terrain.MoveCost} | 防御 +{terrain.DefenseBonus} | " +
+            $"回避 +{terrain.AvoidBonus} | {passableText}";
     }
 
     /// <summary>
-    /// 根据当前攻击目标刷新预测窗口。
+    /// 根据当前攻击目标刷新完整战斗预测窗口。
     /// </summary>
     private void UpdateForecastHud()
     {
@@ -711,7 +740,7 @@ public partial class MainGame : Node2D
 
         if (_selectedUnit is null || _pendingAttackTarget is null)
         {
-            _forecastLabel.Text = "战斗预测：选择攻击范围内敌军后显示。";
+            _forecastLabel.Text = "战斗预测：选择攻击范围内敌军后显示伤害 / 命中 / 必杀 / 追击。";
             return;
         }
 
@@ -721,24 +750,55 @@ public partial class MainGame : Node2D
             _selectedUnit,
             _pendingAttackTarget,
             attackerTerrain.DefenseBonus,
-            defenderTerrain.DefenseBonus);
+            attackerTerrain.AvoidBonus,
+            defenderTerrain.DefenseBonus,
+            defenderTerrain.AvoidBonus);
 
-        int defenderAfter = Mathf.Max(0, _pendingAttackTarget.CurrentHp - forecast.AttackerDamage);
-        int attackerAfter = forecast.DefenderCanCounter
-            ? Mathf.Max(0, _selectedUnit.CurrentHp - forecast.DefenderCounterDamage)
-            : _selectedUnit.CurrentHp;
-        string counterText = forecast.DefenderCanCounter
-            ? $"反击 {forecast.DefenderCounterDamage} → 我方 HP {attackerAfter}/{_selectedUnit.MaxHp}"
-            : "敌方无法反击";
+        string attackerMultiplier = forecast.AttackerStrikeCount > 1
+            ? $" ×{forecast.AttackerStrikeCount}"
+            : string.Empty;
+        string attackerCost = _selectedUnit.EquippedWeapon.HpCost > 0
+            ? $" | 每次消耗 {_selectedUnit.EquippedWeapon.HpCost} HP"
+            : string.Empty;
+
+        string counterText;
+        if (!forecast.DefenderCanCounter)
+        {
+            counterText = "敌方无法反击";
+        }
+        else
+        {
+            string defenderMultiplier = forecast.DefenderStrikeCount > 1
+                ? $" ×{forecast.DefenderStrikeCount}"
+                : string.Empty;
+            string defenderCost = _pendingAttackTarget.EquippedWeapon.HpCost > 0
+                ? $" | 每次消耗 {_pendingAttackTarget.EquippedWeapon.HpCost} HP"
+                : string.Empty;
+            counterText =
+                $"反击：{_pendingAttackTarget.EquippedWeapon.DisplayName} | 伤害 {forecast.DefenderCounterDamage}{defenderMultiplier} | " +
+                $"命中 {forecast.DefenderHitRate}% | 必杀 {forecast.DefenderCriticalRate}%{defenderCost}";
+        }
 
         _forecastLabel.Text =
             $"战斗预测\n{_selectedUnit.DisplayName} → {_pendingAttackTarget.DisplayName}\n" +
-            $"伤害 {forecast.AttackerDamage} → 敌方 HP {defenderAfter}/{_pendingAttackTarget.MaxHp}\n{counterText}\n" +
-            $"目标地形：{defenderTerrain.DisplayName}（防御 +{defenderTerrain.DefenseBonus}）";
+            $"{_selectedUnit.EquippedWeapon.DisplayName} | 伤害 {forecast.AttackerDamage}{attackerMultiplier} | " +
+            $"命中 {forecast.AttackerHitRate}% | 必杀 {forecast.AttackerCriticalRate}%{attackerCost}\n" +
+            counterText;
     }
 
     /// <summary>
-    /// 刷新玩家与敌军的等级、职业、经验和生命值列表。
+    /// 刷新最近一次战斗的逐击演出文本。
+    /// </summary>
+    private void UpdateBattleLogHud()
+    {
+        if (_battleLogLabel is not null)
+        {
+            _battleLogLabel.Text = "战斗记录\n" + _lastBattleLog;
+        }
+    }
+
+    /// <summary>
+    /// 刷新玩家与敌军的等级、职业、装备、经验和生命值列表。
     /// </summary>
     private void UpdateUnitListHud()
     {
@@ -751,14 +811,14 @@ public partial class MainGame : Node2D
             .Where(unit => unit.Team == UnitTeam.Player)
             .Select(unit =>
                 $"{(unit.IsAlive ? "●" : "×")} {unit.DisplayName} Lv.{unit.Level} {unit.ClassDefinition.DisplayName} " +
-                $"HP {unit.CurrentHp}/{unit.MaxHp} EXP {unit.Experience}/100" +
+                $"HP {unit.CurrentHp}/{unit.MaxHp} EXP {unit.Experience}/100 | {unit.EquippedWeapon.DisplayName}" +
                 (unit.HasActed ? " [已行动]" : string.Empty));
 
         IEnumerable<string> enemyLines = _units
             .Where(unit => unit.Team == UnitTeam.Enemy)
             .Select(unit =>
-                $"{(unit.IsAlive ? "●" : "×")} {unit.DisplayName} Lv.{unit.Level} {unit.ClassDefinition.DisplayName} " +
-                $"HP {unit.CurrentHp}/{unit.MaxHp}");
+                $"{(unit.IsAlive ? "●" : "×")} {unit.DisplayName} Lv.{unit.Level} " +
+                $"HP {unit.CurrentHp}/{unit.MaxHp} | {unit.EquippedWeapon.DisplayName}");
 
         _unitListLabel.Text = "我方\n" + string.Join("\n", playerLines) + "\n\n敌方\n" + string.Join("\n", enemyLines);
     }
@@ -772,7 +832,11 @@ public partial class MainGame : Node2D
 
         if (_confirmAttackButton is not null)
         {
-            _confirmAttackButton.Disabled = !playerControlsEnabled || _selectedUnit is null || _pendingAttackTarget is null;
+            _confirmAttackButton.Disabled =
+                !playerControlsEnabled ||
+                _selectedUnit is null ||
+                _pendingAttackTarget is null ||
+                !CombatRules.CanAttack(_selectedUnit, _pendingAttackTarget);
         }
 
         if (_cancelAttackButton is not null)
@@ -866,7 +930,7 @@ public partial class MainGame : Node2D
 
     /// <summary>
     /// 以简单圆形和生命条绘制单位。
-    /// 蓝色代表玩家、红色代表敌军；已行动玩家会变暗。
+    /// 蓝色代表玩家、红色代表敌军；魔法使用者额外绘制一个紫色内点作为临时识别标记。
     /// </summary>
     private void DrawUnits()
     {
@@ -885,6 +949,11 @@ public partial class MainGame : Node2D
 
             DrawCircle(center, 17.0f, baseColor);
             DrawCircle(center, 18.5f, new Color(0.05f, 0.05f, 0.06f), false, 3.0f);
+
+            if (unit.EquippedWeapon.DamageType == DamageType.Magical)
+            {
+                DrawCircle(center, 6.0f, new Color(0.72f, 0.32f, 0.92f));
+            }
 
             // 生命条放在单位圆形底部，长度按当前生命比例缩放。
             float hpRatio = (float)unit.CurrentHp / unit.MaxHp;
