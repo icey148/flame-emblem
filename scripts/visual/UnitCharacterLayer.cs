@@ -4,7 +4,7 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 在战棋地图上绘制 2D 人物小人。
+/// 在战棋地图上绘制 2D 人物小人，并负责把逻辑格移动表现成连续的逐格行走动画。
 /// 正式 map.png 存在时优先绘制纹理；没有素材时继续使用程序绘制人物，因此开发阶段不会被美术进度阻塞。
 /// </summary>
 public partial class UnitCharacterLayer : Node2D
@@ -15,22 +15,46 @@ public partial class UnitCharacterLayer : Node2D
     /// <summary>当前选中的单位，用于显示选中状态和更明显的待机动画。</summary>
     public UnitModel? SelectedUnit { get; set; }
 
+    /// <summary>当前章节地形表；未列出的格子按平地处理。</summary>
+    public IReadOnlyDictionary<Vector2I, TerrainType> Terrain { get; set; } =
+        new Dictionary<Vector2I, TerrainType>();
+
+    /// <summary>当前地图宽度，单位为格。</summary>
+    public int GridWidth { get; set; } = 15;
+
+    /// <summary>当前地图高度，单位为格。</summary>
+    public int GridHeight { get; set; } = 10;
+
     /// <summary>战棋地图左上角像素坐标。</summary>
     public Vector2 BoardOrigin { get; set; }
 
     /// <summary>单格像素尺寸。</summary>
     public int CellSize { get; set; } = 52;
 
-    /// <summary>人物待机动画累计时间。</summary>
+    /// <summary>只要任意单位仍处于逐格移动动画中，就返回 true。</summary>
+    public bool IsMovementAnimating => _motions.Count > 0;
+
+    /// <summary>人物待机/行走动画累计时间。</summary>
     private double _elapsed;
 
+    /// <summary>上一次观察到的逻辑格位置，用于检测 MainGame 已经确认的移动。</summary>
+    private readonly Dictionary<string, Vector2I> _lastGridPositions = new(StringComparer.Ordinal);
+
+    /// <summary>当前正在播放的单位移动动画。</summary>
+    private readonly Dictionary<string, UnitMotion> _motions = new(StringComparer.Ordinal);
+
+    /// <summary>单格行走动画耗时；保持短促，避免战棋操作拖沓。</summary>
+    private const float SecondsPerTile = 0.14f;
+
     /// <summary>
-    /// 每帧推进轻量待机动画并请求重绘。
-    /// 这里只改变视觉偏移，不修改任何单位逻辑坐标。
+    /// 每帧检测逻辑位置变化、推进逐格移动和待机动画，并请求重绘。
+    /// 这里只改变视觉位置，不回写 UnitModel.GridPosition，因此不会影响战斗规则。
     /// </summary>
     public override void _Process(double delta)
     {
         _elapsed += delta;
+        DetectGridPositionChanges();
+        AdvanceMotions((float)delta);
         QueueRedraw();
     }
 
@@ -46,14 +70,71 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
+    /// 检测 MainGame 已确认的格子变化，并为该变化重建一条合法地形路径。
+    /// 第一次看见单位时只记录当前位置，不播放从地图外飞入的动画。
+    /// </summary>
+    private void DetectGridPositionChanges()
+    {
+        foreach (UnitModel unit in Units.Where(unit => unit.IsAlive))
+        {
+            if (!_lastGridPositions.TryGetValue(unit.Id, out Vector2I previous))
+            {
+                _lastGridPositions[unit.Id] = unit.GridPosition;
+                continue;
+            }
+
+            if (previous == unit.GridPosition)
+            {
+                continue;
+            }
+
+            List<Vector2I> path = BuildVisualPath(unit, previous, unit.GridPosition);
+            _motions[unit.Id] = new UnitMotion(unit, path);
+            _lastGridPositions[unit.Id] = unit.GridPosition;
+        }
+
+        // 已经从章节中移除或死亡的单位不再保留位置缓存，避免长期章节中无意义增长。
+        HashSet<string> liveIds = Units.Where(unit => unit.IsAlive).Select(unit => unit.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (string staleId in _lastGridPositions.Keys.Where(id => !liveIds.Contains(id)).ToList())
+        {
+            _lastGridPositions.Remove(staleId);
+            _motions.Remove(staleId);
+        }
+    }
+
+    /// <summary>
+    /// 推进所有正在播放的逐格移动动画。
+    /// 一条路径可能包含多格；每完成一格就进入下一段，直到抵达逻辑目标格。
+    /// </summary>
+    private void AdvanceMotions(float delta)
+    {
+        foreach ((string unitId, UnitMotion motion) in _motions.ToList())
+        {
+            motion.Progress += delta / SecondsPerTile;
+
+            while (motion.Progress >= 1.0f)
+            {
+                motion.Progress -= 1.0f;
+                motion.SegmentIndex++;
+
+                if (motion.SegmentIndex >= motion.Path.Count - 1)
+                {
+                    _motions.Remove(unitId);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// 绘制单个地图人物。
-    /// 正式纹理和程序占位模型共享同一动画状态，因此替换美术后选中/行动反馈仍然保留。
+    /// 正式纹理和程序占位模型共享同一动画状态，因此替换美术后行走/选中/行动反馈仍然保留。
     /// </summary>
     private void DrawUnit(UnitModel unit)
     {
-        Vector2 gridCenter = GridCenter(unit.GridPosition);
+        Vector2 visualCenter = ResolveVisualCenter(unit);
         Vector2 animationOffset = AnimationOffset(unit);
-        Vector2 characterCenter = gridCenter + animationOffset;
+        Vector2 characterCenter = visualCenter + animationOffset;
         Color teamColor = unit.Team == UnitTeam.Player
             ? new Color(0.20f, 0.52f, 1.0f)
             : new Color(0.93f, 0.24f, 0.24f);
@@ -63,9 +144,9 @@ public partial class UnitCharacterLayer : Node2D
             teamColor = teamColor.Darkened(0.35f);
         }
 
-        // 阵营底圈固定在格子中心，人物本体上下浮动时不会造成位置判断上的视觉误解。
-        DrawCircle(gridCenter + new Vector2(0, 11), 20.0f, new Color(0.04f, 0.05f, 0.07f, 0.92f));
-        DrawCircle(gridCenter + new Vector2(0, 11), 20.5f, teamColor, false, 3.0f);
+        // 阵营底圈跟随视觉位置移动，让逐格行走时人物不会与阵营标记脱离。
+        DrawCircle(visualCenter + new Vector2(0, 11), 20.0f, new Color(0.04f, 0.05f, 0.07f, 0.92f));
+        DrawCircle(visualCenter + new Vector2(0, 11), 20.5f, teamColor, false, 3.0f);
 
         Texture2D? mapTexture = CharacterAssetResolver.TryLoad(unit, CharacterArtSlot.Map);
         if (mapTexture is not null)
@@ -79,9 +160,106 @@ public partial class UnitCharacterLayer : Node2D
 
         if (ReferenceEquals(unit, SelectedUnit))
         {
-            // 选中单位增加金色外环，与主地图选择框形成双重反馈。
-            DrawCircle(gridCenter + new Vector2(0, 11), 24.0f, new Color(1.0f, 0.84f, 0.25f), false, 2.5f);
+            // 选中单位增加金色外环；移动时外环也跟随人物走完整条路径。
+            DrawCircle(visualCenter + new Vector2(0, 11), 24.0f, new Color(1.0f, 0.84f, 0.25f), false, 2.5f);
         }
+    }
+
+    /// <summary>
+    /// 返回单位当前用于绘制的像素中心。
+    /// 移动中在当前路径段起终点之间做平滑插值；静止时直接使用逻辑格中心。
+    /// </summary>
+    private Vector2 ResolveVisualCenter(UnitModel unit)
+    {
+        if (!_motions.TryGetValue(unit.Id, out UnitMotion? motion) || motion.Path.Count < 2)
+        {
+            return GridCenter(unit.GridPosition);
+        }
+
+        int fromIndex = Mathf.Clamp(motion.SegmentIndex, 0, motion.Path.Count - 2);
+        Vector2 from = GridCenter(motion.Path[fromIndex]);
+        Vector2 to = GridCenter(motion.Path[fromIndex + 1]);
+
+        // SmoothStep 让每格起步和停步更自然，避免机械匀速滑动。
+        float t = Mathf.SmoothStep(0.0f, 1.0f, Mathf.Clamp(motion.Progress, 0.0f, 1.0f));
+        return from.Lerp(to, t);
+    }
+
+    /// <summary>
+    /// 根据地形移动消耗与当前其他单位阻挡，重建起点到目标格的最短合法路径。
+    /// 目标已经由 MainGame 验证过可达；如果表现层仍无法重建路径，则使用直达两点作为安全回退。
+    /// </summary>
+    private List<Vector2I> BuildVisualPath(UnitModel movingUnit, Vector2I start, Vector2I destination)
+    {
+        if (start == destination)
+        {
+            return new List<Vector2I> { start };
+        }
+
+        Dictionary<Vector2I, int> bestCosts = new() { [start] = 0 };
+        Dictionary<Vector2I, Vector2I> previous = new();
+        PriorityQueue<Vector2I, int> frontier = new();
+        frontier.Enqueue(start, 0);
+
+        HashSet<Vector2I> occupied = Units
+            .Where(unit => unit.IsAlive && !ReferenceEquals(unit, movingUnit))
+            .Select(unit => unit.GridPosition)
+            .ToHashSet();
+
+        while (frontier.TryDequeue(out Vector2I current, out int currentCost))
+        {
+            if (current == destination)
+            {
+                break;
+            }
+
+            if (bestCosts.TryGetValue(current, out int bestKnown) && currentCost > bestKnown)
+            {
+                continue;
+            }
+
+            foreach (Vector2I direction in CardinalDirections())
+            {
+                Vector2I next = current + direction;
+                if (!IsInsideBoard(next) || (occupied.Contains(next) && next != destination))
+                {
+                    continue;
+                }
+
+                TerrainDefinition terrain = TerrainRules.Get(TerrainAt(next));
+                if (!terrain.Passable)
+                {
+                    continue;
+                }
+
+                int nextCost = currentCost + terrain.MoveCost;
+                if (bestCosts.TryGetValue(next, out int existingCost) && existingCost <= nextCost)
+                {
+                    continue;
+                }
+
+                bestCosts[next] = nextCost;
+                previous[next] = current;
+                frontier.Enqueue(next, nextCost);
+            }
+        }
+
+        if (!bestCosts.ContainsKey(destination))
+        {
+            // 逻辑层已经允许该移动时，表现层不应阻断游戏；极端情况下至少做起点到终点的视觉移动。
+            return new List<Vector2I> { start, destination };
+        }
+
+        List<Vector2I> path = new() { destination };
+        Vector2I cursor = destination;
+        while (cursor != start && previous.TryGetValue(cursor, out Vector2I parent))
+        {
+            cursor = parent;
+            path.Add(cursor);
+        }
+
+        path.Reverse();
+        return path;
     }
 
     /// <summary>
@@ -95,7 +273,6 @@ public partial class UnitCharacterLayer : Node2D
 
         if (unit.HasActed)
         {
-            // 已行动状态用半透明遮罩降低亮度，不需要额外准备一套灰色贴图。
             DrawRect(target, new Color(0.04f, 0.05f, 0.07f, 0.38f), true);
         }
     }
@@ -113,7 +290,6 @@ public partial class UnitCharacterLayer : Node2D
             DrawRect(cape, appearance.AccentColor.Darkened(0.18f), true);
         }
 
-        // 身体采用短矩形，头部和头发用圆形叠加，形成清晰的人物轮廓。
         Rect2 body = new(center + new Vector2(-11, 2), new Vector2(22, 25));
         DrawRect(body, appearance.OutfitColor, true);
         DrawRect(body, appearance.AccentColor.Darkened(0.45f), false, 2.0f);
@@ -132,11 +308,17 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
-    /// 根据人物当前地图状态计算轻量动画偏移。
-    /// 选中人物呼吸幅度更明显；已行动人物停止动画，用静止感强化回合状态。
+    /// 根据人物当前地图状态计算动画偏移。
+    /// 行走时使用更快的上下步伐；静止时使用原有轻量呼吸动画。
     /// </summary>
     private Vector2 AnimationOffset(UnitModel unit)
     {
+        if (_motions.ContainsKey(unit.Id))
+        {
+            float walkBob = Mathf.Abs(Mathf.Sin((float)_elapsed * 22.0f)) * 3.0f;
+            return new Vector2(0, -walkBob);
+        }
+
         if (unit.HasActed)
         {
             return Vector2.Zero;
@@ -151,7 +333,7 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
-    /// 根据人物 ID 生成稳定的视觉相位，避免所有单位同时上下移动像整齐机械振动。
+    /// 根据人物 ID 生成稳定视觉相位，避免所有单位同时上下移动。
     /// </summary>
     private static float StableVisualPhase(string id)
     {
@@ -194,6 +376,27 @@ public partial class UnitCharacterLayer : Node2D
         }
     }
 
+    /// <summary>获取指定格地形；未配置的格子默认是平地。</summary>
+    private TerrainType TerrainAt(Vector2I cell)
+    {
+        return Terrain.TryGetValue(cell, out TerrainType terrain) ? terrain : TerrainType.Plain;
+    }
+
+    /// <summary>判断格子是否位于当前地图范围内。</summary>
+    private bool IsInsideBoard(Vector2I cell)
+    {
+        return cell.X >= 0 && cell.X < GridWidth && cell.Y >= 0 && cell.Y < GridHeight;
+    }
+
+    /// <summary>返回战棋寻路使用的四个正交方向。</summary>
+    private static IEnumerable<Vector2I> CardinalDirections()
+    {
+        yield return Vector2I.Up;
+        yield return Vector2I.Down;
+        yield return Vector2I.Left;
+        yield return Vector2I.Right;
+    }
+
     /// <summary>
     /// 把逻辑格坐标转换为当前地图格子的像素中心。
     /// </summary>
@@ -202,5 +405,31 @@ public partial class UnitCharacterLayer : Node2D
         return BoardOrigin + new Vector2(
             cell.X * CellSize + CellSize / 2.0f,
             cell.Y * CellSize + CellSize / 2.0f);
+    }
+
+    /// <summary>
+    /// 保存单个单位当前的视觉移动状态。
+    /// Path 包含起点与终点；SegmentIndex 指向正在播放的路径段起点。
+    /// </summary>
+    private sealed class UnitMotion
+    {
+        /// <summary>创建一条单位移动动画。</summary>
+        public UnitMotion(UnitModel unit, List<Vector2I> path)
+        {
+            Unit = unit;
+            Path = path;
+        }
+
+        /// <summary>正在移动的单位。</summary>
+        public UnitModel Unit { get; }
+
+        /// <summary>完整逐格路径。</summary>
+        public List<Vector2I> Path { get; }
+
+        /// <summary>当前路径段起点索引。</summary>
+        public int SegmentIndex { get; set; }
+
+        /// <summary>当前路径段 0~1 的动画进度。</summary>
+        public float Progress { get; set; }
     }
 }
