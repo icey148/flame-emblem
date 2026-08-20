@@ -1,14 +1,18 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 ; Main scene for the playable tactical-RPG prototype.
-; Gameplay remains on MainGame.cs while character presentation is attached as
-; an independent child node so visual work can evolve without coupling to rules.
+; Gameplay remains on MainGame.cs while presentation/interaction helpers are
+; independent child nodes so they can evolve without coupling to combat rules.
 
 [ext_resource type="Script" path="res://scripts/main/MainGame.cs" id="1_main"]
 [ext_resource type="Script" path="res://scripts/visual/CharacterVisualCoordinator.cs" id="2_visuals"]
+[ext_resource type="Script" path="res://scripts/visual/PostMoveActionCoordinator.cs" id="3_actions"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
 [node name="CharacterVisualCoordinator" type="Node" parent="."]
 script = ExtResource("2_visuals")
+
+[node name="PostMoveActionCoordinator" type="Node" parent="."]
+script = ExtResource("3_actions")
