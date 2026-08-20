@@ -120,19 +120,37 @@ public partial class AnimatedBattleCharacterControl : Control
 
     /// <summary>
     /// 在缺少正式状态帧时提供基本动作位移。
-    /// 位移刻意保持短促，角色本体仍由像素块职业模板绘制。
+    /// 轻装前冲/闪避幅度更大，重甲更短更沉，长袍施法上下浮动更明显。
     /// </summary>
     private Vector2 ResolveFallbackOffset()
     {
         float direction = MirrorHorizontally ? -1.0f : 1.0f;
+        CharacterBodySilhouette body = _unit is null
+            ? CharacterBodySilhouette.Light
+            : CharacterAppearanceCatalog.Get(_unit).BodySilhouette;
+
+        float attackDistance = body switch
+        {
+            CharacterBodySilhouette.Armored => 24.0f,
+            CharacterBodySilhouette.Robed => 28.0f,
+            _ => 36.0f
+        };
+        float dodgeDistance = body switch
+        {
+            CharacterBodySilhouette.Armored => 18.0f,
+            CharacterBodySilhouette.Robed => 26.0f,
+            _ => 32.0f
+        };
+        float castLift = body == CharacterBodySilhouette.Robed ? 7.0f : 4.0f;
+
         return _state switch
         {
             CharacterAnimationState.Attack => new Vector2(
-                direction * Mathf.Sin(Mathf.Clamp(_stateElapsed / 0.32f, 0.0f, 1.0f) * Mathf.Pi) * 34.0f,
+                direction * Mathf.Sin(Mathf.Clamp(_stateElapsed / 0.32f, 0.0f, 1.0f) * Mathf.Pi) * attackDistance,
                 0),
-            CharacterAnimationState.Cast => new Vector2(0, -Mathf.Abs(Mathf.Sin(_stateElapsed * 12.0f)) * 4.0f),
+            CharacterAnimationState.Cast => new Vector2(0, -Mathf.Abs(Mathf.Sin(_stateElapsed * 12.0f)) * castLift),
             CharacterAnimationState.Dodge => new Vector2(
-                -direction * Mathf.Sin(Mathf.Clamp(_stateElapsed / 0.25f, 0.0f, 1.0f) * Mathf.Pi) * 28.0f,
+                -direction * Mathf.Sin(Mathf.Clamp(_stateElapsed / 0.25f, 0.0f, 1.0f) * Mathf.Pi) * dodgeDistance,
                 0),
             CharacterAnimationState.Hit => new Vector2(Mathf.Round(Mathf.Sin(_stateElapsed * 55.0f) * 6.0f), 0),
             CharacterAnimationState.Defeat => new Vector2(0, Mathf.Min(52.0f, Mathf.Round(_stateElapsed * 70.0f))),
@@ -176,7 +194,7 @@ public partial class AnimatedBattleCharacterControl : Control
 
     /// <summary>
     /// 没有正式战斗帧时绘制原创侧视像素职业模板。
-    /// 模板采用有限色阶、硬边矩形与职业武器轮廓，不复制任何既有游戏人物素材。
+    /// 模板采用有限色阶、硬边矩形、身体轮廓与职业武器轮廓，不复制任何既有游戏人物素材。
     /// </summary>
     private void DrawProceduralPixelFigure(Vector2 offset, float opacity)
     {
@@ -200,28 +218,14 @@ public partial class AnimatedBattleCharacterControl : Control
         Color metal = ApplyOpacity(new Color(0.82f, 0.84f, 0.82f), opacity);
         Color darkMetal = ApplyOpacity(new Color(0.28f, 0.29f, 0.30f), opacity);
 
-        // 披风先画在身体后方，剑士/法师等有披风角色因此拥有更宽的侧视轮廓。
+        // 披风先画在身体后方，确保肩甲、袍摆和腿部仍保持清晰外轮廓。
         if (appearance.HasCape)
         {
             DrawBattlePixel(origin, 7, 15, 15, 16, accent.Darkened(0.22f));
             DrawBattlePixel(origin, side > 0 ? 5 : 20, 18, 4, 12, accent.Darkened(0.34f));
         }
 
-        // 双腿与靴子保持明显分离；攻击时前脚迈出一格，形成复古战斗动画的前冲姿态。
-        int frontLegShift = _state == CharacterAnimationState.Attack ? side * 2 : 0;
-        DrawBattlePixel(origin, 10 + Math.Max(0, frontLegShift), 28, 4, 9, outline);
-        DrawBattlePixel(origin, 17 + Math.Min(0, frontLegShift), 28, 4, 9, outline);
-        DrawBattlePixel(origin, 10 + Math.Max(0, frontLegShift), 28, 3, 6, outfitShadow);
-        DrawBattlePixel(origin, 17 + Math.Min(0, frontLegShift), 28, 3, 6, outfitShadow);
-        DrawBattlePixel(origin, 8 + Math.Max(0, frontLegShift), 35, 7, 3, darkMetal);
-        DrawBattlePixel(origin, 16 + Math.Min(0, frontLegShift), 35, 7, 3, darkMetal);
-
-        // 躯干使用外轮廓、主色、高光、腰带四个层次，保持低色数仍能读出护甲/服装结构。
-        DrawBattlePixel(origin, 8, 13, 14, 17, outline);
-        DrawBattlePixel(origin, 9, 14, 12, 15, outfit);
-        DrawBattlePixel(origin, 9, 14, 4, 11, outfitLight);
-        DrawBattlePixel(origin, 18, 20, 3, 9, outfitShadow);
-        DrawBattlePixel(origin, 8, 24, 14, 3, accent);
+        DrawProceduralBody(origin, appearance, outline, outfit, outfitShadow, outfitLight, accent, darkMetal, side);
 
         // 头部同样只使用矩形像素，面部朝向由单侧眼睛和前发位置提示。
         DrawBattlePixel(origin, 10, 4, 10, 10, outline);
@@ -235,8 +239,82 @@ public partial class AnimatedBattleCharacterControl : Control
     }
 
     /// <summary>
-    /// 根据当前动作绘制手臂位置。
-    /// 攻击/施法时手臂前伸，其余状态保持护在身体两侧。
+    /// 根据轻装、重甲、长袍三种身体模板绘制正式战斗回退人物。
+    /// 攻击姿态会让轻装/重甲前腿变化，而长袍主要通过袍摆和上身位移表达动作。
+    /// </summary>
+    private void DrawProceduralBody(
+        Vector2 origin,
+        CharacterAppearanceDefinition appearance,
+        Color outline,
+        Color outfit,
+        Color shadow,
+        Color light,
+        Color accent,
+        Color darkMetal,
+        int side)
+    {
+        int frontLegShift = _state == CharacterAnimationState.Attack ? side * 2 : 0;
+
+        switch (appearance.BodySilhouette)
+        {
+            case CharacterBodySilhouette.Armored:
+                // 重甲：宽肩甲与厚胸甲形成方正轮廓，腿甲和靴子也比轻装更大。
+                DrawBattlePixel(origin, 6, 12, 18, 18, outline);
+                DrawBattlePixel(origin, 8, 14, 14, 15, outfit);
+                DrawBattlePixel(origin, 5, 13, 5, 6, darkMetal);
+                DrawBattlePixel(origin, 21, 13, 5, 6, darkMetal);
+                DrawBattlePixel(origin, 8, 15, 4, 10, light);
+                DrawBattlePixel(origin, 19, 19, 3, 10, shadow);
+                DrawBattlePixel(origin, 7, 22, 16, 3, accent);
+
+                DrawBattlePixel(origin, 8 + Math.Max(0, frontLegShift), 28, 5, 9, outline);
+                DrawBattlePixel(origin, 18 + Math.Min(0, frontLegShift), 28, 5, 9, outline);
+                DrawBattlePixel(origin, 9 + Math.Max(0, frontLegShift), 28, 4, 7, shadow);
+                DrawBattlePixel(origin, 18 + Math.Min(0, frontLegShift), 28, 4, 7, shadow);
+                DrawBattlePixel(origin, 6 + Math.Max(0, frontLegShift), 35, 8, 3, darkMetal);
+                DrawBattlePixel(origin, 17 + Math.Min(0, frontLegShift), 35, 8, 3, darkMetal);
+                break;
+
+            case CharacterBodySilhouette.Robed:
+                // 长袍：上身较窄、下摆展开，施法时袍摆末端用强调色亮边模拟魔力扰动。
+                DrawBattlePixel(origin, 8, 13, 14, 13, outline);
+                DrawBattlePixel(origin, 9, 14, 12, 11, outfit);
+                DrawBattlePixel(origin, 9, 14, 4, 8, light);
+                DrawBattlePixel(origin, 18, 18, 3, 7, shadow);
+                DrawBattlePixel(origin, 8, 22, 14, 3, accent);
+                DrawBattlePixel(origin, 7, 25, 16, 11, outline);
+                DrawBattlePixel(origin, 8, 25, 14, 10, outfit);
+                DrawBattlePixel(origin, 8, 25, 4, 8, light.Darkened(0.06f));
+                DrawBattlePixel(origin, 19, 27, 3, 8, shadow);
+                if (_state == CharacterAnimationState.Cast)
+                {
+                    DrawBattlePixel(origin, 8, 34, 14, 1, accent.Lightened(0.30f));
+                }
+                DrawBattlePixel(origin, 8, 35, 5, 2, darkMetal);
+                DrawBattlePixel(origin, 18, 35, 5, 2, darkMetal);
+                break;
+
+            default:
+                // 轻装：窄肩、短上衣、分离双腿；攻击时前脚跨出，动作最灵活。
+                DrawBattlePixel(origin, 8, 13, 14, 17, outline);
+                DrawBattlePixel(origin, 9, 14, 12, 15, outfit);
+                DrawBattlePixel(origin, 9, 14, 4, 11, light);
+                DrawBattlePixel(origin, 18, 20, 3, 9, shadow);
+                DrawBattlePixel(origin, 8, 24, 14, 3, accent);
+
+                DrawBattlePixel(origin, 10 + Math.Max(0, frontLegShift), 28, 4, 9, outline);
+                DrawBattlePixel(origin, 17 + Math.Min(0, frontLegShift), 28, 4, 9, outline);
+                DrawBattlePixel(origin, 10 + Math.Max(0, frontLegShift), 28, 3, 6, shadow);
+                DrawBattlePixel(origin, 17 + Math.Min(0, frontLegShift), 28, 3, 6, shadow);
+                DrawBattlePixel(origin, 8 + Math.Max(0, frontLegShift), 35, 7, 3, darkMetal);
+                DrawBattlePixel(origin, 16 + Math.Min(0, frontLegShift), 35, 7, 3, darkMetal);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 根据当前动作和身体模板绘制手臂位置。
+    /// 重甲使用厚护臂，长袍使用宽袖，轻装保持细窄手臂。
     /// </summary>
     private void DrawProceduralArms(
         Vector2 origin,
@@ -248,17 +326,24 @@ public partial class AnimatedBattleCharacterControl : Control
         bool activePose = _state is CharacterAnimationState.Attack or CharacterAnimationState.Cast;
         int frontX = side > 0 ? 22 : 5;
         int backX = side > 0 ? 5 : 22;
+        int width = appearance.BodySilhouette switch
+        {
+            CharacterBodySilhouette.Armored => 4,
+            CharacterBodySilhouette.Robed => 5,
+            _ => 3
+        };
+        int armHeight = appearance.BodySilhouette == CharacterBodySilhouette.Robed ? 9 : 8;
 
         if (activePose)
         {
-            DrawBattlePixel(origin, frontX, 16, 5, 3, sleeve);
-            DrawBattlePixel(origin, frontX + (side > 0 ? 4 : -1), 16, 2, 2, skin);
-            DrawBattlePixel(origin, backX, 18, 3, 7, sleeve);
+            DrawBattlePixel(origin, frontX - (side < 0 ? width - 3 : 0), 16, width + 2, 3, sleeve);
+            DrawBattlePixel(origin, frontX + (side > 0 ? width + 1 : -1), 16, 2, 2, skin);
+            DrawBattlePixel(origin, backX - (side < 0 ? 1 : 0), 18, width, armHeight - 1, sleeve);
             return;
         }
 
-        DrawBattlePixel(origin, frontX, 17, 3, 8, sleeve);
-        DrawBattlePixel(origin, backX, 17, 3, 8, sleeve);
+        DrawBattlePixel(origin, frontX - (side < 0 ? width - 3 : 0), 17, width, armHeight, sleeve);
+        DrawBattlePixel(origin, backX - (side < 0 ? 1 : 0), 17, width, armHeight, sleeve);
     }
 
     /// <summary>
