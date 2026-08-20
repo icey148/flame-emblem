@@ -5,18 +5,18 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 把真实 CombatExchangeResult 按攻击顺序播放成独立复古战斗演出。
-/// 时间线由 Godot Timer 驱动，而不是依赖 _Process；这样人物绘制或帧刷新出现异常时，
-/// 主战斗演出仍然能够继续推进并最终释放输入遮罩。
+/// 时间线完全由 Godot Timer 驱动，不依赖 _Process；玩家主动攻击优先立刻播放，
+/// 敌军攻击则先等待地图移动动画结束，保证视觉顺序不会被同步结算打乱。
 /// </summary>
 public partial class RetroBattleAnimationCoordinator : Node
 {
-    /// <summary>等待播放的战斗交换队列；敌军连续结算时按顺序保留。</summary>
+    /// <summary>等待播放的战斗交换队列。</summary>
     private readonly Queue<CombatExchangeResult> _queue = new();
 
-    /// <summary>地图人物表现协调器；开始敌军战斗前先等待地图移动动画真正结束。</summary>
+    /// <summary>地图人物表现协调器，用于等待敌军地图移动完成。</summary>
     private CharacterVisualCoordinator? _visualCoordinator;
 
-    /// <summary>全屏输入拦截层；只有真正进入横向战斗演出后才显示。</summary>
+    /// <summary>全屏输入拦截层。</summary>
     private Control? _blocker;
 
     /// <summary>左侧战斗人物。</summary>
@@ -37,64 +37,55 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>命中、闪避、必杀和魔法的程序特效层。</summary>
     private RetroBattleEffectControl? _effectControl;
 
-    /// <summary>驱动 Intro/Windup/Impact/Recovery/Outro 的一次性阶段计时器。</summary>
+    /// <summary>驱动 Intro/Windup/Impact/Recovery/Outro 的阶段计时器。</summary>
     private Timer? _phaseTimer;
 
-    /// <summary>独立于阶段计时器的整场战斗安全超时。</summary>
+    /// <summary>整场战斗安全超时。</summary>
     private Timer? _watchdogTimer;
 
-    /// <summary>
-    /// 等待地图人物移动结束的短周期计时器。
-    /// 第一次也会至少等待一次短计时，让 CharacterVisualCoordinator 有机会检测同帧发生的敌军格子变化。
-    /// </summary>
+    /// <summary>等待地图移动结束的轮询计时器。</summary>
     private Timer? _movementGateTimer;
 
     /// <summary>当前正在播放的完整交换。</summary>
     private CombatExchangeResult? _currentExchange;
 
-    /// <summary>当前交换左侧固定人物；第一击主动方固定站左侧。</summary>
+    /// <summary>当前交换左侧固定人物。</summary>
     private UnitModel? _leftUnit;
 
-    /// <summary>当前交换右侧固定人物；第一击防守方固定站右侧。</summary>
+    /// <summary>当前交换右侧固定人物。</summary>
     private UnitModel? _rightUnit;
 
-    /// <summary>当前正在播放第几次实际攻击。</summary>
+    /// <summary>当前正在播放第几次攻击。</summary>
     private int _strikeIndex;
 
     /// <summary>当前演出阶段。</summary>
     private PlaybackPhase _phase = PlaybackPhase.Hidden;
 
-    /// <summary>每一击允许的最大整场预算，用于生成安全超时。</summary>
+    /// <summary>每一击允许的最大整场预算。</summary>
     private const double MaximumSecondsPerStrike = 2.2;
 
-    /// <summary>无论攻击次数多少，一场演出至少拥有的安全超时时间。</summary>
+    /// <summary>整场演出最短安全超时。</summary>
     private const double MinimumExchangeTimeoutSeconds = 6.0;
 
-    /// <summary>地图移动检测轮询间隔；很短，只用于确保移动先于战斗窗口展示。</summary>
+    /// <summary>敌军移动等待轮询间隔。</summary>
     private const double MovementGateIntervalSeconds = 0.05;
 
-    /// <summary>
-    /// 进入场景树时订阅真实战斗结算事件。
-    /// </summary>
+    /// <summary>进入场景树时订阅战斗结算事件。</summary>
     public override void _EnterTree()
     {
         BattleAnimationBus.ExchangeResolved += OnExchangeResolved;
     }
 
-    /// <summary>
-    /// 离开场景树时解除静态事件订阅并释放任何可能存在的输入遮罩。
-    /// </summary>
+    /// <summary>离开场景树时释放订阅、计时器和全局播放状态。</summary>
     public override void _ExitTree()
     {
         BattleAnimationBus.ExchangeResolved -= OnExchangeResolved;
         StopAllTimers();
+        BattleAnimationBus.EndPlayback();
         _blocker?.Hide();
     }
 
-    /// <summary>
-    /// 创建演出 UI 与独立 Timer 时间线。
-    /// Timer 和协调器都使用 Always 处理模式，未来即使加入暂停菜单也不会把战斗演出冻结。
-    /// </summary>
+    /// <summary>创建 Timer 时间线和战斗 UI。</summary>
     public override void _Ready()
     {
         ProcessMode = ProcessModeEnum.Always;
@@ -104,9 +95,9 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 收到真实战斗结果后加入队列。
-    /// 不在事件回调里立即弹战斗窗口；先通过 movement gate 等至少一个引擎时刻，
-    /// 让敌军地图位移能够被人物表现层检测并播放。
+    /// 收到真实战斗结果后入队。
+    /// 玩家主动攻击必须优先立刻打开演出，避免后续自动敌军回合抢先移动；
+    /// 敌军攻击则先经过地图移动 gate。
     /// </summary>
     private void OnExchangeResolved(CombatExchangeResult exchange)
     {
@@ -116,12 +107,30 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
 
         _queue.Enqueue(exchange);
+        RequestStartForQueueHead();
+    }
+
+    /// <summary>根据队首攻击方决定立即播放还是先等地图移动。</summary>
+    private void RequestStartForQueueHead()
+    {
+        if (_currentExchange is not null || _queue.Count == 0)
+        {
+            return;
+        }
+
+        CombatExchangeResult next = _queue.Peek();
+        bool playerInitiated = next.Strikes.Count > 0 &&
+                               next.Strikes[0].Attacker.Team == UnitTeam.Player;
+        if (playerInitiated)
+        {
+            StartNextExchangeNow();
+            return;
+        }
+
         RequestStartAfterMovement();
     }
 
-    /// <summary>
-    /// 创建三个独立一次性 Timer：阶段、整场安全超时、地图移动等待。
-    /// </summary>
+    /// <summary>创建阶段、超时、移动等待三个独立一次性 Timer。</summary>
     private void CreateTimers()
     {
         _phaseTimer = new Timer
@@ -151,9 +160,7 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 请求开始下一场交换，但至少延后一个短计时周期。
-    /// 这一步非常重要：敌军逻辑会在同一帧修改 GridPosition 并结算攻击，
-    /// 延后后地图人物层才能先发现位置变化并创建逐格移动动画。
+    /// 敌军战斗至少延后一个短计时周期，让地图人物层先检测 GridPosition 改变并创建移动动画。
     /// </summary>
     private void RequestStartAfterMovement()
     {
@@ -168,10 +175,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
     }
 
-    /// <summary>
-    /// 检查地图人物是否还在移动。
-    /// 有移动时继续等待；全部到达后才显示横向战斗演出。
-    /// </summary>
+    /// <summary>地图仍在移动时继续等；全部到达后才打开敌军横向战斗界面。</summary>
     private void CheckMovementAndStartExchange()
     {
         if (_currentExchange is not null || _queue.Count == 0)
@@ -188,9 +192,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         StartNextExchangeNow();
     }
 
-    /// <summary>
-    /// 从队列取出下一场战斗并正式打开横向演出窗口。
-    /// </summary>
+    /// <summary>从队列取出下一场战斗并正式打开演出。</summary>
     private void StartNextExchangeNow()
     {
         if (_currentExchange is not null || _queue.Count == 0)
@@ -201,15 +203,18 @@ public partial class RetroBattleAnimationCoordinator : Node
         CombatExchangeResult exchange = _queue.Dequeue();
         if (exchange.Strikes.Count == 0)
         {
-            RequestStartAfterMovement();
+            RequestStartForQueueHead();
             return;
         }
 
+        _movementGateTimer?.Stop();
         _currentExchange = exchange;
         _strikeIndex = 0;
         _leftUnit = exchange.Strikes[0].Attacker;
         _rightUnit = exchange.Strikes[0].Defender;
 
+        // 先标记全局表现状态，再显示遮罩；地图移动层可以据此暂停后台动画。
+        BattleAnimationBus.BeginPlayback();
         _blocker?.Show();
         _leftCharacter?.SetUnit(_leftUnit);
         _rightCharacter?.SetUnit(_rightUnit);
@@ -239,25 +244,20 @@ public partial class RetroBattleAnimationCoordinator : Node
         SchedulePhase(PlaybackPhase.Intro, 0.28);
     }
 
-    /// <summary>
-    /// 把状态切到指定阶段，并让阶段 Timer 在给定时间后推进。
-    /// </summary>
+    /// <summary>切换到指定演出阶段并启动 Timer。</summary>
     private void SchedulePhase(PlaybackPhase phase, double seconds)
     {
         _phase = phase;
         _phaseTimer?.Start(Math.Max(0.01, seconds));
     }
 
-    /// <summary>
-    /// Timer 到点后只根据当前阶段推进一次。
-    /// 没有逐帧累加状态，因此不会再出现 _Process 停止后整场演出永久卡住的问题。
-    /// </summary>
+    /// <summary>阶段 Timer 到点后推进一次状态。</summary>
     private void AdvancePlaybackPhase()
     {
         if (_currentExchange is null)
         {
             ResetCurrentExchangeState();
-            RequestStartAfterMovement();
+            RequestStartForQueueHead();
             return;
         }
 
@@ -284,10 +284,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
     }
 
-    /// <summary>
-    /// 开始当前一击的蓄力/挥击阶段。
-    /// 物理攻击播放 Attack，魔法攻击播放 Cast。
-    /// </summary>
+    /// <summary>开始当前一击的蓄力/攻击动作。</summary>
     private void StartCurrentStrike()
     {
         CombatStrikeResult? strike = CurrentStrike();
@@ -319,9 +316,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         SchedulePhase(PlaybackPhase.Windup, CurrentWindupDuration());
     }
 
-    /// <summary>
-    /// 进入这一击的结果阶段：未命中播放闪避，命中播放受击或倒下，必杀额外播放闪光。
-    /// </summary>
+    /// <summary>显示命中、闪避、必杀或倒下结果。</summary>
     private void StartImpact()
     {
         CombatStrikeResult? strike = CurrentStrike();
@@ -349,7 +344,6 @@ public partial class RetroBattleAnimationCoordinator : Node
             defenderControl?.Play(strike.DefenderDefeated
                 ? CharacterAnimationState.Defeat
                 : CharacterAnimationState.Hit);
-
             _effectControl?.Play(
                 strike.Critical ? RetroBattleEffectKind.Critical : RetroBattleEffectKind.Hit,
                 IsLeftUnit(strike.Attacker));
@@ -365,9 +359,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         SchedulePhase(PlaybackPhase.Impact, 0.34);
     }
 
-    /// <summary>
-    /// 结果展示完成后恢复攻击方待机；未被击倒的防守方也恢复待机。
-    /// </summary>
+    /// <summary>结果展示完成后恢复待机。</summary>
     private void StartRecovery()
     {
         CombatStrikeResult? strike = CurrentStrike();
@@ -387,9 +379,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         SchedulePhase(PlaybackPhase.Recovery, 0.20);
     }
 
-    /// <summary>
-    /// 当前一击结束后进入下一次反击/追击；全部攻击结束后进入收尾。
-    /// </summary>
+    /// <summary>进入下一次反击/追击，或进入整场收尾。</summary>
     private void AdvanceStrikeOrFinish()
     {
         if (_currentExchange is null)
@@ -414,28 +404,21 @@ public partial class RetroBattleAnimationCoordinator : Node
         SchedulePhase(PlaybackPhase.Outro, 0.42);
     }
 
-    /// <summary>
-    /// 正常结束当前横向演出，回到地图并准备下一场排队战斗。
-    /// </summary>
+    /// <summary>正常结束当前演出并准备队列下一场。</summary>
     private void FinishExchange()
     {
         ResetCurrentExchangeState();
-        RequestStartAfterMovement();
+        RequestStartForQueueHead();
     }
 
-    /// <summary>
-    /// 手动跳过当前以及排队中的全部演出。
-    /// 战斗数值早已结算完成，因此跳过只影响视觉。
-    /// </summary>
+    /// <summary>手动跳过当前与排队中的全部演出。</summary>
     private void SkipAllBattleAnimations()
     {
         _queue.Clear();
         ResetCurrentExchangeState();
     }
 
-    /// <summary>
-    /// 异常或安全超时时强制结束当前演出，并清空后续队列。
-    /// </summary>
+    /// <summary>异常或超时时强制释放战斗窗口。</summary>
     private void EmergencyFinishExchange(string reason)
     {
         GD.PushWarning($"Battle animation aborted safely: {reason}");
@@ -443,9 +426,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         ResetCurrentExchangeState();
     }
 
-    /// <summary>
-    /// 统一释放当前演出状态与全屏遮罩。
-    /// </summary>
+    /// <summary>统一释放当前演出状态和全屏遮罩。</summary>
     private void ResetCurrentExchangeState()
     {
         _phaseTimer?.Stop();
@@ -459,6 +440,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         _rightUnit = null;
         _strikeIndex = 0;
         _phase = PlaybackPhase.Hidden;
+        BattleAnimationBus.EndPlayback();
     }
 
     /// <summary>停止协调器拥有的全部计时器。</summary>
@@ -469,10 +451,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         _movementGateTimer?.Stop();
     }
 
-    /// <summary>
-    /// 所有 Timer 和事件入口都通过这一层执行。
-    /// 表现层异常只会终止演出，不能破坏已经完成的战斗数值结算。
-    /// </summary>
+    /// <summary>所有 Timer 和事件入口都通过异常隔离执行。</summary>
     private void RunSafely(Action action)
     {
         try
@@ -499,7 +478,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         return _currentExchange.Strikes[_strikeIndex];
     }
 
-    /// <summary>魔法施法需要略长蓄力时间，物理攻击保持短促。</summary>
+    /// <summary>魔法蓄力略长于物理攻击。</summary>
     private double CurrentWindupDuration()
     {
         CombatStrikeResult? strike = CurrentStrike();
@@ -511,7 +490,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         return strike.Attacker.EquippedWeapon.DamageType == DamageType.Magical ? 0.48 : 0.32;
     }
 
-    /// <summary>判断某人物是否固定站在当前战斗画面的左侧。</summary>
+    /// <summary>判断某人物是否固定站在左侧。</summary>
     private bool IsLeftUnit(UnitModel unit)
     {
         return ReferenceEquals(unit, _leftUnit);
@@ -523,9 +502,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         return IsLeftUnit(unit) ? _leftCharacter : _rightCharacter;
     }
 
-    /// <summary>
-    /// 创建全屏输入拦截、暗色背景、左右人物位、中央特效层和跳过按钮。
-    /// </summary>
+    /// <summary>创建全屏战斗演出 UI。</summary>
     private void CreateBattleOverlay()
     {
         CanvasLayer layer = new()
