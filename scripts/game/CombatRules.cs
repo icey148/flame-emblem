@@ -21,7 +21,7 @@ public sealed class CombatForecast
     /// <summary>攻击方本次会造成的伤害。</summary>
     public int AttackerDamage { get; }
 
-    /// <summary>防守方在受到攻击后是否具备反击距离。</summary>
+    /// <summary>防守方在承受本次攻击后是否仍存活并具备反击距离。</summary>
     public bool DefenderCanCounter { get; }
 
     /// <summary>防守方若能反击，会造成的伤害。</summary>
@@ -74,7 +74,8 @@ public static class CombatRules
         int defenderTerrainDefenseBonus)
     {
         int attackerDamage = CalculateDamage(attacker, defender, defenderTerrainDefenseBonus);
-        bool defenderCanCounter = defender.IsAlive && IsInAttackRange(defender, attacker);
+        bool defenderSurvives = defender.CurrentHp > attackerDamage;
+        bool defenderCanCounter = defenderSurvives && IsInAttackRange(defender, attacker);
         int counterDamage = defenderCanCounter
             ? CalculateDamage(defender, attacker, attackerTerrainDefenseBonus)
             : 0;
