@@ -1,21 +1,79 @@
 # Flame Emblem
 
-A personal, original 2D tactical RPG project inspired by classic grid-based strategy RPG design.
+个人用原创 2D 战术 RPG 项目，玩法方向参考经典格子制 SRPG，但角色、剧情、地图、UI、音频和美术素材保持原创。
 
-## Technical baseline
+## 当前技术基线
 
-- Engine: Godot 4.6.x .NET edition
+- Engine: Godot 4.7.1 .NET edition
 - Language: C# / .NET 8
-- Runtime: fully local single-player
-- Enemy behavior: deterministic/rule-based game logic only; no LLM or generative AI is used by the game
-- Content direction: original characters, story, maps, UI, audio and art assets rather than copied commercial game assets
+- Runtime: 纯本地单机
+- Enemy behavior: 固定规则 / 确定性游戏逻辑，不接入 LLM、生成式 AI 或联网 AI 服务
+- Prototype rendering: 第一版地图、单位和范围高亮均由代码绘制，不依赖外部素材
 
-## Code comment policy
+## 当前可玩内容
 
-All C# source files in this repository must contain meaningful comments. Public classes and methods should use XML documentation where practical, and important game-state transitions, combat formulas, pathfinding rules, and non-obvious branches must include concise inline comments.
+开发分支：`feature/playable-srpg-foundation`
 
-Configuration files such as `project.godot`, `.tscn`, and JSON data do not support the same C# comment style consistently, so their structure and important fields are documented in repository documentation instead of adding invalid syntax.
+目前已经实现第一版战斗骨架：
 
-## Development
+- 15×10 格子战斗地图
+- 4 名我方单位和 5 名敌军单位
+- 点击选中单位
+- BFS 计算移动范围
+- 单位阻挡
+- 移动后攻击
+- 基础物理伤害计算
+- 单位 HP 与简单生命条
+- 等待 / 手动结束玩家回合
+- 玩家全部行动后自动切换敌军回合
+- 敌军按固定规则寻找最近玩家、移动并攻击
+- 胜利 / 失败判定
+- 右侧状态与单位 HP HUD
 
-Gameplay implementation is developed on feature branches before being merged into `main`.
+## 运行方式
+
+1. 安装 Godot 4.7.1 的 **.NET 版本**。
+2. 安装兼容的 .NET SDK（项目当前目标框架为 `net8.0`）。
+3. clone 仓库并切换到 `feature/playable-srpg-foundation`。
+4. 使用 Godot 打开仓库根目录中的 `project.godot`。
+5. 等待 C# 项目恢复依赖并编译，然后运行主场景。
+
+## 操作方式
+
+- 鼠标左键点击蓝色单位：选中。
+- 蓝色区域：当前单位可移动范围。
+- 移动后点击相邻红色敌军：攻击。
+- `等待（结束当前单位行动）`：结束当前单位行动。
+- `结束玩家回合`：让尚未行动的单位放弃本回合并进入敌军回合。
+
+## 代码注释规范
+
+这是项目硬性规范：**所有代码文件必须有有意义的注释**。
+
+- C# 类和核心方法尽量使用 XML 文档注释。
+- 核心字段需要说明用途。
+- 回合状态变化、战斗公式、寻路、敌军规则和不直观分支必须有行内注释。
+- 不写“为了有注释而注释”的废话，注释重点解释为什么这样做、规则是什么、未来扩展点在哪里。
+- `project.godot`、`.tscn` 等配置文件在格式允许的地方写注释；JSON 不强行加入非法注释，字段含义统一写进文档。
+
+## 当前目录
+
+```text
+flame-emblem/
+├── project.godot
+├── FlameEmblem.csproj
+├── scenes/
+│   └── main/
+│       └── Main.tscn
+└── scripts/
+    ├── game/
+    │   ├── UnitModel.cs
+    │   ├── CombatRules.cs
+    │   └── EnemyTurnController.cs
+    └── main/
+        └── MainGame.cs
+```
+
+## 下一阶段
+
+下一阶段会继续拆出正式的地图 / 关卡数据层，并逐步加入：地形移动消耗、攻击预览、经验与升级、职业、转职、武器/魔法数据、剧情对话、世界地图节点和存档。
