@@ -12,6 +12,17 @@
       "hp_cost": 0
     },
     {
+      "id": "training_sword",
+      "name": "练习剑",
+      "damage_type": "physical",
+      "might": 2,
+      "hit": 100,
+      "critical": 0,
+      "min_range": 1,
+      "max_range": 1,
+      "hp_cost": 0
+    },
+    {
       "id": "short_bow",
       "name": "短弓",
       "damage_type": "physical",
@@ -20,6 +31,17 @@
       "critical": 5,
       "min_range": 2,
       "max_range": 2,
+      "hp_cost": 0
+    },
+    {
+      "id": "long_bow",
+      "name": "长弓",
+      "damage_type": "physical",
+      "might": 3,
+      "hit": 78,
+      "critical": 0,
+      "min_range": 2,
+      "max_range": 3,
       "hp_cost": 0
     },
     {
@@ -34,6 +56,17 @@
       "hp_cost": 0
     },
     {
+      "id": "javelin",
+      "name": "投枪",
+      "damage_type": "physical",
+      "might": 4,
+      "hit": 72,
+      "critical": 0,
+      "min_range": 1,
+      "max_range": 2,
+      "hp_cost": 0
+    },
+    {
       "id": "ember",
       "name": "火星术",
       "damage_type": "magical",
@@ -43,6 +76,17 @@
       "min_range": 1,
       "max_range": 2,
       "hp_cost": 2
+    },
+    {
+      "id": "thunder",
+      "name": "雷击术",
+      "damage_type": "magical",
+      "might": 7,
+      "hit": 76,
+      "critical": 12,
+      "min_range": 2,
+      "max_range": 2,
+      "hp_cost": 4
     },
     {
       "id": "raider_axe",
