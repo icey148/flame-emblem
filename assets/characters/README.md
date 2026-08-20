@@ -2,6 +2,27 @@
 
 人物美术使用统一目录约定。正式素材不存在时，游戏会自动使用程序绘制占位人物，不会因为缺图中断运行。
 
+## 正式我方角色生产表
+
+四名当前我方角色已经有固定的原创像素美术生产规范：
+
+- 总生产表：`docs/player-character-production-sheet.md`
+- Adrian：`assets/characters/adrian/README.md`
+- Celine：`assets/characters/celine/README.md`
+- Rowan：`assets/characters/rowan/README.md`
+- Mira：`assets/characters/mira/README.md`
+
+当前正式目标规格：
+
+- 地图人物：32×32 px，脚底基准线 y=28
+- 战斗人物：96×96 px，脚底基准线建议 y=84
+- 头像：64×64 px
+- 地图每人 20 帧：四方向 Idle 2 帧 + Walk 3 帧
+- 战斗基础：Idle 2 / Attack 4 / Hit 3 / Dodge 3 / Defeat 4
+- Mira 额外：Cast 5 帧
+
+角色造型、像素帧和细节保持原创；目标是统一古典日式战棋幻想的修长比例和职业辨识，不直接复制既有商业游戏角色素材。
+
 ## 单张兼容素材
 
 每个人物或职业仍然可以使用最简单的单张素材：
@@ -54,19 +75,25 @@ assets/characters/<key>/battle/
 ├── attack_0.png
 ├── attack_1.png
 ├── attack_2.png
+├── attack_3.png
 ├── hit_0.png
 ├── hit_1.png
+├── hit_2.png
 ├── dodge_0.png
 ├── dodge_1.png
+├── dodge_2.png
 ├── defeat_0.png
 ├── defeat_1.png
 ├── defeat_2.png
+├── defeat_3.png
 ├── cast_0.png
 ├── cast_1.png
-└── cast_2.png
+├── cast_2.png
+├── cast_3.png
+└── cast_4.png
 ```
 
-当前战斗状态机已经会根据真实结算结果自动选择：
+当前战斗状态机会根据真实结算结果自动选择：
 
 - `attack`：物理攻击
 - `cast`：魔法施放
