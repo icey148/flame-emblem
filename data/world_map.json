@@ -24,7 +24,7 @@
     {
       "id": "east_road",
       "name": "东境道路",
-      "type": "future_battle",
+      "type": "battle",
       "chapter_id": "chapter_02",
       "chapter_path": "res://data/chapter_02.json",
       "x": 930,
