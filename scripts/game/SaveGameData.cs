@@ -4,13 +4,23 @@ using System.Text.Json;
 namespace FlameEmblem.Game;
 
 /// <summary>
+/// 标记单槽位存档恢复时应该回到哪一类场景。
+/// v1/v2 都只有战斗内存档，因此旧格式迁移时默认视为 Battle。
+/// </summary>
+public enum SaveLocation
+{
+    Battle,
+    WorldMap
+}
+
+/// <summary>
 /// 一份本地存档的根对象。
 /// 单场战斗快照与跨章节战役状态同时保存，使读档既能精确恢复当前回合，也能恢复世界地图解锁与长期队伍成长。
 /// </summary>
 public sealed class SaveGameData
 {
-    /// <summary>当前存档格式版本；v2 开始包含完整战役快照。</summary>
-    public const int CurrentSchemaVersion = 2;
+    /// <summary>当前存档格式版本；v3 开始明确记录存档所处场景类型。</summary>
+    public const int CurrentSchemaVersion = 3;
 
     /// <summary>最早仍允许兼容读取的存档格式版本。</summary>
     public const int MinimumSupportedSchemaVersion = 1;
@@ -18,19 +28,22 @@ public sealed class SaveGameData
     /// <summary>写入存档时使用的格式版本。</summary>
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
-    /// <summary>当前单场战斗章节稳定 ID。</summary>
+    /// <summary>读取该存档后应该回到战斗还是世界地图。</summary>
+    public SaveLocation Location { get; set; } = SaveLocation.Battle;
+
+    /// <summary>当前单场战斗章节稳定 ID；世界地图存档也保留最近章节，方便继续显示进度。</summary>
     public string ChapterId { get; set; } = CampaignState.DefaultChapterId;
 
     /// <summary>当前单场战斗章节 JSON 路径；用于跨章节读档时自动进入正确地图。</summary>
     public string ChapterPath { get; set; } = CampaignState.DefaultChapterPath;
 
-    /// <summary>当前玩家回合编号。</summary>
+    /// <summary>当前玩家回合编号；世界地图存档固定保持 1。</summary>
     public int Round { get; set; } = 1;
 
     /// <summary>最近一次战斗记录；读取后继续显示在右侧 HUD。</summary>
     public string LastBattleLog { get; set; } = "尚未发生战斗。";
 
-    /// <summary>当前章节中的全部单位状态，包括敌军和已经倒下的单位。</summary>
+    /// <summary>当前章节中的全部单位状态，包括敌军和已经倒下的单位；世界地图存档为空。</summary>
     public List<UnitSaveData> Units { get; set; } = new();
 
     /// <summary>世界地图解锁、当前章节与跨章节玩家队伍状态。</summary>
@@ -208,7 +221,7 @@ public static class SaveGameService
 
     /// <summary>
     /// 从本地单槽位读取存档。
-    /// v1 旧存档仍允许读取；缺少的战役字段会在内存中补成安全默认值，并在下一次保存时升级到 v2。
+    /// v1/v2 旧存档仍允许读取；缺少的新字段会在内存中补成安全默认值，并在下一次保存时升级到 v3。
     /// </summary>
     public static bool TryLoad(out SaveGameData? data, out string message)
     {
@@ -229,16 +242,17 @@ public static class SaveGameService
                 return false;
             }
 
-            if (data.SchemaVersion < SaveGameData.MinimumSupportedSchemaVersion ||
-                data.SchemaVersion > SaveGameData.CurrentSchemaVersion)
+            int loadedSchemaVersion = data.SchemaVersion;
+            if (loadedSchemaVersion < SaveGameData.MinimumSupportedSchemaVersion ||
+                loadedSchemaVersion > SaveGameData.CurrentSchemaVersion)
             {
-                message = $"存档版本 {data.SchemaVersion} 与当前版本 {SaveGameData.CurrentSchemaVersion} 不兼容。";
+                message = $"存档版本 {loadedSchemaVersion} 与当前版本 {SaveGameData.CurrentSchemaVersion} 不兼容。";
                 data = null;
                 return false;
             }
 
-            NormalizeLoadedData(data);
-            message = data.SchemaVersion == SaveGameData.CurrentSchemaVersion
+            NormalizeLoadedData(data, loadedSchemaVersion);
+            message = loadedSchemaVersion == SaveGameData.CurrentSchemaVersion
                 ? "存档读取成功。"
                 : "旧版存档读取成功；下次保存会自动升级格式。";
             return true;
@@ -248,6 +262,39 @@ public static class SaveGameService
             GD.PushError($"读取进度失败：{exception}");
             message = $"读取失败：{exception.Message}";
             data = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 删除当前单槽位存档。
+    /// 标题画面的“新游戏”在用户确认覆盖旧进度后调用，避免旧战役在新游戏里被误继续。
+    /// </summary>
+    public static bool TryDeleteSave(out string message)
+    {
+        try
+        {
+            _pendingSceneRestore = null;
+            if (!HasSave)
+            {
+                message = "没有需要删除的旧存档。";
+                return true;
+            }
+
+            Error error = DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(SavePath));
+            if (error != Error.Ok)
+            {
+                message = $"无法删除旧存档：{error}。";
+                return false;
+            }
+
+            message = "旧存档已清除。";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"删除旧存档失败：{exception}");
+            message = $"删除旧存档失败：{exception.Message}";
             return false;
         }
     }
@@ -269,9 +316,15 @@ public static class SaveGameService
     /// <summary>只查看是否存在跨场景待恢复快照，不提前消费它。</summary>
     public static bool HasPendingSceneRestore => _pendingSceneRestore is not null;
 
-    /// <summary>为 v1 或字段缺失的存档补齐安全默认值。</summary>
-    private static void NormalizeLoadedData(SaveGameData data)
+    /// <summary>为旧格式或字段缺失的存档补齐安全默认值。</summary>
+    private static void NormalizeLoadedData(SaveGameData data, int loadedSchemaVersion)
     {
+        // v1/v2 只有战斗内保存入口，因此 Location 字段即使由反序列化得到默认值，也明确固定为 Battle。
+        if (loadedSchemaVersion <= 2)
+        {
+            data.Location = SaveLocation.Battle;
+        }
+
         data.ChapterId = string.IsNullOrWhiteSpace(data.ChapterId)
             ? CampaignState.DefaultChapterId
             : data.ChapterId;
@@ -282,14 +335,23 @@ public static class SaveGameService
         data.Units ??= new List<UnitSaveData>();
         data.Campaign ??= new CampaignProgressSaveData();
 
-        if (string.IsNullOrWhiteSpace(data.Campaign.CurrentChapterId))
+        if (loadedSchemaVersion == 1)
         {
+            // v1 没有真正的 Campaign 字段；必须以单场战斗章节为主，避免默认 chapter_01 覆盖旧的第二章存档。
             data.Campaign.CurrentChapterId = data.ChapterId;
-        }
-
-        if (string.IsNullOrWhiteSpace(data.Campaign.CurrentChapterPath))
-        {
             data.Campaign.CurrentChapterPath = data.ChapterPath;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(data.Campaign.CurrentChapterId))
+            {
+                data.Campaign.CurrentChapterId = data.ChapterId;
+            }
+
+            if (string.IsNullOrWhiteSpace(data.Campaign.CurrentChapterPath))
+            {
+                data.Campaign.CurrentChapterPath = data.ChapterPath;
+            }
         }
 
         data.Campaign.CompletedChapterIds ??= new List<string>();
