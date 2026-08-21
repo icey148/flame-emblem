@@ -1,5 +1,6 @@
 ; Godot project configuration for the Flame Emblem playable foundation.
-; This file keeps the first prototype lightweight and uses the compatibility renderer.
+; The visual baseline is 1280x720 and all runtime enlargement uses integer scaling
+; so low-resolution battle characters and UI edges never pass through fractional pixels.
 config_version=5
 
 [application]
@@ -12,6 +13,8 @@ window/size/viewport_height=720
 window/size/window_width_override=1280
 window/size/window_height_override=720
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+window/stretch/scale_mode="integer"
 
 [dotnet]
 project/assembly_name="FlameEmblem"
