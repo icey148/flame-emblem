@@ -432,11 +432,11 @@ public partial class AnimatedBattleCharacterControl : Control
         if (appearance.WeaponSilhouette == CharacterWeaponSilhouette.Tome && casting)
         {
             // 法师：先举书，再把施法手完全伸向目标，最后缓慢回落。
-            int frontX = side > 0 ? 55 : 33;
+            int castFrontX = side > 0 ? 55 : 33;
             int extension = pose == 2 ? 8 : pose == 1 ? 4 : 6;
-            DrawPixel(origin, frontX + Math.Min(0, side * extension), pose == 2 ? 31 : 34, 7 + extension, 5, outline);
-            DrawPixel(origin, frontX + Math.Min(0, side * extension) + 1, pose == 2 ? 32 : 35, 5 + extension, 3, sleeve);
-            DrawPixel(origin, side > 0 ? frontX + 5 + extension : frontX - 2 - extension, pose == 2 ? 32 : 35, 3, 3, skin);
+            DrawPixel(origin, castFrontX + Math.Min(0, side * extension), pose == 2 ? 31 : 34, 7 + extension, 5, outline);
+            DrawPixel(origin, castFrontX + Math.Min(0, side * extension) + 1, pose == 2 ? 32 : 35, 5 + extension, 3, sleeve);
+            DrawPixel(origin, side > 0 ? castFrontX + 5 + extension : castFrontX - 2 - extension, pose == 2 ? 32 : 35, 3, 3, skin);
             DrawPixel(origin, side > 0 ? 34 : 55, 42, 7, 5, sleeve);
             return;
         }
