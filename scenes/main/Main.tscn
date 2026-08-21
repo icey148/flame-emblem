@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=11 format=3]
 
 ; Main scene for the playable tactical-RPG prototype.
 ; Gameplay remains on MainGame.cs while presentation/interaction helpers are
@@ -11,7 +11,6 @@
 [ext_resource type="Script" path="res://scripts/visual/RetroBattlefieldLayer.cs" id="5_battlefield"]
 [ext_resource type="Script" path="res://scripts/visual/RetroHudCoordinator.cs" id="6_hud"]
 [ext_resource type="Script" path="res://scripts/visual/BattleMovementPauseCoordinator.cs" id="7_movement_pause"]
-[ext_resource type="Script" path="res://scripts/game/PlayerMovementPassThroughCoordinator.cs" id="8_player_pass_through"]
 [ext_resource type="Script" path="res://scripts/main/RightCommandCoordinator.cs" id="9_right_commands"]
 [ext_resource type="Script" path="res://scripts/visual/BattlePresentationPolishCoordinator.cs" id="10_battle_polish"]
 [ext_resource type="Script" path="res://scripts/visual/BattleWeaponEffectCoordinator.cs" id="11_weapon_effects"]
@@ -21,9 +20,6 @@ script = ExtResource("1_main")
 
 [node name="RetroBattlefieldLayer" type="Node2D" parent="."]
 script = ExtResource("5_battlefield")
-
-[node name="PlayerMovementPassThroughCoordinator" type="Node" parent="."]
-script = ExtResource("8_player_pass_through")
 
 [node name="CharacterVisualCoordinator" type="Node" parent="."]
 script = ExtResource("2_visuals")
