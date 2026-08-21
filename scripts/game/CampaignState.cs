@@ -4,7 +4,7 @@ namespace FlameEmblem.Game;
 
 /// <summary>
 /// 保存当前游戏进程中的战役进度与玩家队伍状态。
-/// 世界地图和战斗场景会被 Godot 反复切换，因此不能把跨章节状态只留在某个场景节点中。
+/// 世界地图和战斗场景会被 Godot 反复切换，因此跨章节状态由这里统一持有，并可转换成 SaveGameData 的持久化快照。
 /// </summary>
 public static class CampaignState
 {
@@ -157,6 +157,112 @@ public static class CampaignState
     }
 
     /// <summary>
+    /// 创建一份可以写进本地 JSON 的战役快照。
+    /// 返回对象不共享内部集合，后续保存序列化不会意外修改当前运行时状态。
+    /// </summary>
+    public static CampaignProgressSaveData CreateSaveSnapshot()
+    {
+        CampaignProgressSaveData snapshot = new()
+        {
+            CurrentChapterId = _currentChapterId,
+            CurrentChapterPath = _currentChapterPath,
+            CompletedChapterIds = CompletedChapters
+                .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+        };
+
+        foreach ((string id, CampaignUnitState state) in PlayerRoster.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            snapshot.PlayerRoster.Add(new CampaignUnitSaveData
+            {
+                Id = id,
+                ClassId = state.ClassId,
+                WeaponId = state.WeaponId,
+                Level = state.Level,
+                Experience = state.Experience,
+                MaxHp = state.MaxHp,
+                CurrentHp = state.CurrentHp,
+                Strength = state.Strength,
+                Magic = state.Magic,
+                Skill = state.Skill,
+                Speed = state.Speed,
+                Luck = state.Luck,
+                Defense = state.Defense,
+                Resistance = state.Resistance
+            });
+        }
+
+        return snapshot;
+    }
+
+    /// <summary>
+    /// 从已经解析的本地存档恢复世界地图与长期队伍状态。
+    /// 不直接创建战斗单位；真正进入章节后仍由 ChapterDataLoader 生成单位，再通过 ApplyPlayerRoster 套用长期状态。
+    /// </summary>
+    public static void RestoreSaveSnapshot(
+        CampaignProgressSaveData? snapshot,
+        string fallbackChapterId,
+        string fallbackChapterPath)
+    {
+        string safeChapterId = !string.IsNullOrWhiteSpace(snapshot?.CurrentChapterId)
+            ? snapshot!.CurrentChapterId
+            : string.IsNullOrWhiteSpace(fallbackChapterId) ? DefaultChapterId : fallbackChapterId;
+        string safeChapterPath = !string.IsNullOrWhiteSpace(snapshot?.CurrentChapterPath)
+            ? snapshot!.CurrentChapterPath
+            : string.IsNullOrWhiteSpace(fallbackChapterPath) ? DefaultChapterPath : fallbackChapterPath;
+
+        _currentChapterId = safeChapterId;
+        _currentChapterPath = safeChapterPath;
+        CompletedChapters.Clear();
+        PlayerRoster.Clear();
+
+        if (snapshot is null)
+        {
+            InferRequiredCompletedChapters(safeChapterId);
+            return;
+        }
+
+        foreach (string chapterId in snapshot.CompletedChapterIds ?? new List<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(chapterId))
+            {
+                CompletedChapters.Add(chapterId);
+            }
+        }
+
+        foreach (CampaignUnitSaveData state in snapshot.PlayerRoster ?? new List<CampaignUnitSaveData>())
+        {
+            if (string.IsNullOrWhiteSpace(state.Id) ||
+                string.IsNullOrWhiteSpace(state.ClassId) ||
+                string.IsNullOrWhiteSpace(state.WeaponId))
+            {
+                continue;
+            }
+
+            PlayerRoster[state.Id] = new CampaignUnitState(
+                state.ClassId,
+                state.WeaponId,
+                Math.Max(1, state.Level),
+                Math.Clamp(state.Experience, 0, 99),
+                Math.Max(1, state.MaxHp),
+                Math.Clamp(state.CurrentHp, 0, Math.Max(1, state.MaxHp)),
+                Math.Max(0, state.Strength),
+                Math.Max(0, state.Magic),
+                Math.Max(0, state.Skill),
+                Math.Max(0, state.Speed),
+                Math.Max(0, state.Luck),
+                Math.Max(0, state.Defense),
+                Math.Max(0, state.Resistance));
+        }
+
+        // v1 旧存档没有世界地图完成记录；至少根据当前章节的前置条件补齐能够到达该章节所必需的节点。
+        if (CompletedChapters.Count == 0)
+        {
+            InferRequiredCompletedChapters(safeChapterId);
+        }
+    }
+
+    /// <summary>
     /// 在祠堂休整时回复所有仍然存活角色的 HP。
     /// 已经阵亡的角色保持 0 HP，不通过普通休整复活。
     /// </summary>
@@ -194,6 +300,36 @@ public static class CampaignState
         _currentChapterPath = DefaultChapterPath;
         CompletedChapters.Clear();
         PlayerRoster.Clear();
+    }
+
+    /// <summary>
+    /// 兼容 v1 旧存档：根据当前世界地图节点的前置条件推断最少必须已经完成的章节。
+    /// 推断只用于缺少完成记录的旧格式，不会覆盖 v2 明确保存的完成状态。
+    /// </summary>
+    private static void InferRequiredCompletedChapters(string currentChapterId)
+    {
+        try
+        {
+            WorldMapNodeDefinition? currentNode = WorldMapCatalog.Load().Nodes.FirstOrDefault(node =>
+                node.ChapterId.Equals(currentChapterId, StringComparison.OrdinalIgnoreCase));
+            if (currentNode is null)
+            {
+                return;
+            }
+
+            foreach (string requiredId in currentNode.RequiredCompletedChapterIds)
+            {
+                if (!string.IsNullOrWhiteSpace(requiredId))
+                {
+                    CompletedChapters.Add(requiredId);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            // 世界地图本身损坏时不让旧存档迁移阻止战斗读取；只记录警告并保留空完成集合。
+            GD.PushWarning($"无法为旧存档推断世界地图进度：{exception.Message}");
+        }
     }
 
     /// <summary>一个玩家角色在章节之间需要保留的长期状态。</summary>
