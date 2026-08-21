@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 把真实 CombatExchangeResult 按攻击顺序播放成独立复古战斗演出。
-/// 战斗画面采用已经确认的参考稿布局：纯黑背景、敌军固定左侧、我方固定右侧、
+/// 战斗画面采用已经确认的唯一规格：纯黑背景、敌军固定左侧、我方固定右侧、
 /// 双状态框与中央攻击提示框；本类只负责表现时间线，不改变任何战斗结算规则。
 /// </summary>
 public partial class RetroBattleAnimationCoordinator : Node
@@ -27,7 +27,7 @@ public partial class RetroBattleAnimationCoordinator : Node
 
     /// <summary>
     /// 兼容旧表现协调器保留的左侧姓名标签。
-    /// 新标准稿已经把姓名放进底部状态框，因此该标签默认隐藏。
+    /// 正式规格已经把姓名放进底部状态框，因此该标签默认隐藏。
     /// </summary>
     private Label? _leftLabel;
 
@@ -91,7 +91,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         _blocker?.Hide();
     }
 
-    /// <summary>创建 Timer 时间线和标准稿式战斗 UI。</summary>
+    /// <summary>创建 Timer 时间线和正式规格战斗 UI。</summary>
     public override void _Ready()
     {
         ProcessMode = ProcessModeEnum.Always;
@@ -286,7 +286,7 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 标准稿固定敌军在左、我方在右。
+    /// 正式规格固定敌军在左、我方在右。
     /// 如果未来出现非敌我战斗，则回退到攻击方左、防守方右，避免表现层阻断规则测试。
     /// </summary>
     private void AssignScreenSides(CombatExchangeResult exchange)
@@ -484,13 +484,6 @@ public partial class RetroBattleAnimationCoordinator : Node
         RequestStartForQueueHead();
     }
 
-    /// <summary>手动跳过当前与排队中的全部演出。</summary>
-    private void SkipAllBattleAnimations()
-    {
-        _queue.Clear();
-        ResetCurrentExchangeState();
-    }
-
     /// <summary>异常或超时时强制释放战斗窗口。</summary>
     private void EmergencyFinishExchange(string reason)
     {
@@ -577,8 +570,8 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 创建参考稿式全屏战斗界面。
-    /// 人物使用 420×390 整数像素空间；状态框从 y=390 开始，人物脚部正好落在状态框上沿附近。
+    /// 创建正式规格的全屏战斗界面。
+    /// 所有尺寸都直接读取 ReferenceBattleLayout，避免第一帧先出现旧尺寸再被表现协调器纠正。
     /// </summary>
     private void CreateBattleOverlay()
     {
@@ -591,7 +584,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         _blocker = new Control
         {
             Position = Vector2.Zero,
-            Size = new Vector2(1280, 720),
+            Size = ReferenceBattleLayout.ViewportSize,
             MouseFilter = Control.MouseFilterEnum.Stop,
             Visible = false
         };
@@ -600,7 +593,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         ColorRect backdrop = new()
         {
             Position = Vector2.Zero,
-            Size = new Vector2(1280, 720),
+            Size = ReferenceBattleLayout.ViewportSize,
             Color = Colors.Black,
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
@@ -610,17 +603,17 @@ public partial class RetroBattleAnimationCoordinator : Node
         {
             Name = "ReferenceBattleStage",
             Position = Vector2.Zero,
-            Size = new Vector2(1280, 720),
+            Size = ReferenceBattleLayout.ViewportSize,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         _blocker.AddChild(stage);
 
-        // 敌军固定站在左侧，我方固定站在右侧；全部坐标使用整数，避免亚像素插值模糊。
+        // 敌军固定左侧、我方固定右侧；正式位置仍由最终人物表现层做 3× 像素补偿。
         _leftCharacter = new AnimatedBattleCharacterControl
         {
-            Position = new Vector2(100, 4),
-            Size = new Vector2(420, 390),
+            Position = ReferenceBattleLayout.LeftCharacterPosition,
+            Size = ReferenceBattleLayout.CharacterControlSize,
             MirrorHorizontally = false,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest
@@ -629,15 +622,15 @@ public partial class RetroBattleAnimationCoordinator : Node
 
         _rightCharacter = new AnimatedBattleCharacterControl
         {
-            Position = new Vector2(760, 4),
-            Size = new Vector2(420, 390),
+            Position = ReferenceBattleLayout.RightCharacterPosition,
+            Size = ReferenceBattleLayout.CharacterControlSize,
             MirrorHorizontally = true,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         stage.AddChild(_rightCharacter);
 
-        // 旧协调器仍通过反射读取两个姓名字段，因此保留不可见兼容标签。
+        // 旧阵营同步层仍通过反射读取两个姓名字段，因此保留不可见兼容标签。
         _leftLabel = new Label
         {
             Visible = false,
@@ -655,7 +648,9 @@ public partial class RetroBattleAnimationCoordinator : Node
         _effectControl = new RetroBattleEffectControl
         {
             Position = Vector2.Zero,
-            Size = new Vector2(1280, 390),
+            Size = new Vector2(
+                ReferenceBattleLayout.ViewportSize.X,
+                ReferenceBattleLayout.EffectRegionHeight),
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Visible = true,
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest
@@ -664,18 +659,18 @@ public partial class RetroBattleAnimationCoordinator : Node
 
         _statusHud = new RetroBattleStatusHudControl
         {
-            Position = new Vector2(50, 390),
-            Size = new Vector2(1180, 286),
+            Position = ReferenceBattleLayout.StatusHudPosition,
+            Size = ReferenceBattleLayout.StatusHudSize,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         stage.AddChild(_statusHud);
 
-        // 中央信息框压在两边状态框上方，结构和参考稿保持一致但文字与比例为原创实现。
+        // 中央信息框覆盖两边身份区下沿，和确认参考图使用同一构图关系。
         PanelContainer resultPanel = new()
         {
-            Position = new Vector2(390, 348),
-            Size = new Vector2(500, 88),
+            Position = ReferenceBattleLayout.ResultPanelPosition,
+            Size = ReferenceBattleLayout.ResultPanelSize,
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
         resultPanel.AddThemeStyleboxOverride("panel", BuildReferencePanelStyle());
@@ -684,7 +679,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         _resultLabel = new Label
         {
             Text = "战斗开始",
-            CustomMinimumSize = new Vector2(492, 80),
+            CustomMinimumSize = ReferenceBattleLayout.ResultLabelMinimumSize,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             MouseFilter = Control.MouseFilterEnum.Ignore
@@ -694,18 +689,8 @@ public partial class RetroBattleAnimationCoordinator : Node
         _resultLabel.AddThemeConstantOverride("shadow_offset_x", 2);
         _resultLabel.AddThemeConstantOverride("shadow_offset_y", 2);
         _resultLabel.AddThemeFontSizeOverride("font_size", 28);
+        _resultLabel.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
         resultPanel.AddChild(_resultLabel);
-
-        Button skipButton = new()
-        {
-            Text = "跳过",
-            Position = new Vector2(1168, 18),
-            Size = new Vector2(82, 36),
-            MouseFilter = Control.MouseFilterEnum.Stop
-        };
-        StyleReferenceButton(skipButton);
-        skipButton.Pressed += SkipAllBattleAnimations;
-        stage.AddChild(skipButton);
     }
 
     /// <summary>创建中央信息框使用的纯黑白硬边样式。</summary>
@@ -724,23 +709,6 @@ public partial class RetroBattleAnimationCoordinator : Node
             CornerRadiusBottomLeft = 0,
             CornerRadiusBottomRight = 0
         };
-    }
-
-    /// <summary>让跳过按钮也使用同一套黑底白框像素语言。</summary>
-    private static void StyleReferenceButton(Button button)
-    {
-        StyleBoxFlat normal = BuildReferencePanelStyle();
-        StyleBoxFlat hover = BuildReferencePanelStyle();
-        hover.BgColor = new Color("181a20");
-        StyleBoxFlat pressed = BuildReferencePanelStyle();
-        pressed.BgColor = new Color("2a2d34");
-
-        button.AddThemeStyleboxOverride("normal", normal);
-        button.AddThemeStyleboxOverride("hover", hover);
-        button.AddThemeStyleboxOverride("pressed", pressed);
-        button.AddThemeColorOverride("font_color", new Color("f3f3ef"));
-        button.AddThemeColorOverride("font_hover_color", Colors.White);
-        button.AddThemeFontSizeOverride("font_size", 14);
     }
 
     /// <summary>保存一场战斗在表现层开始播放前必须冻结的数值。</summary>
