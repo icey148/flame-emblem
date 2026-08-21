@@ -4,7 +4,7 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 对现有横向战斗演出做纯表现优化：提亮底色、加入像素战场舞台、调整人物站位和文字对比。
+/// 对现有横向战斗演出做纯表现优化：提亮底色、加入像素战场舞台、调整人物站位，并替换缺少正式素材时的程序人物骨架。
 /// 不修改战斗时间线和数值逻辑，避免美术调整影响结算稳定性。
 /// </summary>
 public partial class BattlePresentationPolishCoordinator : Node
@@ -121,7 +121,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             leftCharacter.Position = new Vector2(48, 48);
             leftCharacter.Scale = Vector2.One;
             leftCharacter.Modulate = new Color(1.04f, 1.04f, 1.02f, 1.0f);
-            AttachDetailOverlay(leftCharacter, "LeftCharacterDetailOverlay");
+            AttachRefinedFigure(leftCharacter, "LeftRefinedBattleFigure");
         }
 
         if (_rightCharacterField?.GetValue(_battleCoordinator) is AnimatedBattleCharacterControl rightCharacter)
@@ -129,7 +129,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             rightCharacter.Position = new Vector2(632, 48);
             rightCharacter.Scale = Vector2.One;
             rightCharacter.Modulate = new Color(1.04f, 1.04f, 1.02f, 1.0f);
-            AttachDetailOverlay(rightCharacter, "RightCharacterDetailOverlay");
+            AttachRefinedFigure(rightCharacter, "RightRefinedBattleFigure");
         }
 
         // 中央结果文字改成亮米黄色并增强阴影，在亮背景上也能保持清晰。
@@ -146,17 +146,18 @@ public partial class BattlePresentationPolishCoordinator : Node
     }
 
     /// <summary>
-    /// 给一个程序战斗人物挂载细节叠加层。
-    /// 叠加层会自行检测正式 PNG；正式素材存在时不会绘制任何程序细节。
+    /// 给现有动画人物挂载新的修长程序人物绘制层。
+    /// 原控件仍负责 SetUnit/Play/动作计时；新层只读取这些状态并替换旧的方块身体。
+    /// 正式 battle PNG 存在时新层会自动让位。
     /// </summary>
-    private static void AttachDetailOverlay(AnimatedBattleCharacterControl character, string overlayName)
+    private static void AttachRefinedFigure(AnimatedBattleCharacterControl character, string overlayName)
     {
-        if (character.GetChildren().OfType<BattleCharacterDetailOverlayControl>().Any())
+        if (character.GetChildren().OfType<RefinedBattleFigureControl>().Any())
         {
             return;
         }
 
-        BattleCharacterDetailOverlayControl overlay = new()
+        RefinedBattleFigureControl overlay = new()
         {
             Name = overlayName,
             Position = Vector2.Zero,
