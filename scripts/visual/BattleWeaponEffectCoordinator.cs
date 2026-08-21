@@ -6,7 +6,8 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 在不修改核心战斗 Timer 的前提下，为物理攻击启动剑斩、枪刺和箭矢飞行表现。
-/// 该协调器只读取已经确定的 CombatStrikeResult，不参与目标选择、命中判定或伤害计算。
+/// 新战斗布局固定敌军在左、我方在右，因此效果方向直接读取实际屏幕左侧单位，
+/// 不再假设“主动攻击方永远站在左边”。
 /// </summary>
 public partial class BattleWeaponEffectCoordinator : Node
 {
@@ -24,6 +25,9 @@ public partial class BattleWeaponEffectCoordinator : Node
 
     /// <summary>读取现有特效控件的私有字段。</summary>
     private FieldInfo? _effectControlField;
+
+    /// <summary>读取当前画面左侧固定单位。</summary>
+    private FieldInfo? _leftUnitField;
 
     /// <summary>上一场已经启动物理轨迹的战斗交换。</summary>
     private CombatExchangeResult? _lastExchange;
@@ -49,11 +53,13 @@ public partial class BattleWeaponEffectCoordinator : Node
         _strikeIndexField = coordinatorType.GetField("_strikeIndex", members);
         _phaseField = coordinatorType.GetField("_phase", members);
         _effectControlField = coordinatorType.GetField("_effectControl", members);
+        _leftUnitField = coordinatorType.GetField("_leftUnit", members);
 
         if (_currentPresentationField is null ||
             _strikeIndexField is null ||
             _phaseField is null ||
-            _effectControlField is null)
+            _effectControlField is null ||
+            _leftUnitField is null)
         {
             GD.PushWarning("BattleWeaponEffectCoordinator 无法读取战斗表现字段，武器轨迹不会启动。");
             SetProcess(false);
@@ -90,7 +96,7 @@ public partial class BattleWeaponEffectCoordinator : Node
         CombatStrikeResult strike = exchange.Strikes[strikeIndex];
         bool magical = strike.Attacker.EquippedWeapon.DamageType == DamageType.Magical;
 
-        // 魔法已经由核心时间线调用 RetroBattleEffectKind.Magic；这里仅补物理武器轨迹，避免重复重启魔法计时。
+        // 魔法已经由核心时间线启动；这里仅补物理武器轨迹，避免重复重启魔法表现。
         if (magical)
         {
             return;
@@ -102,17 +108,10 @@ public partial class BattleWeaponEffectCoordinator : Node
         }
 
         CharacterAppearanceDefinition appearance = CharacterAppearanceCatalog.Get(strike.Attacker);
-        bool leftToRight = ReferenceEquals(strike.Attacker, exchange.InitiatingAttacker)
-            ? true
-            : false;
+        UnitModel? leftUnit = _leftUnitField?.GetValue(_battleCoordinator) as UnitModel;
 
-        // 反击时发起者固定在右侧，因此需要结合本场左右固定单位重新确定飞行方向。
-        leftToRight = ReferenceEquals(strike.Attacker, exchange.InitiatingAttacker)
-            ? true
-            : ReferenceEquals(strike.Attacker, exchange.InitiatingDefender)
-                ? false
-                : leftToRight;
-
+        // 效果方向只由当前实际屏幕位置决定：左侧攻击向右，右侧攻击向左。
+        bool leftToRight = leftUnit is not null && ReferenceEquals(strike.Attacker, leftUnit);
         effectControl.PlayWeaponWindup(appearance.WeaponSilhouette, false, leftToRight);
     }
 
