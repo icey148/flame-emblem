@@ -1,0 +1,68 @@
+{
+  "promotions": [
+    {
+      "from_class_id": "vanguard",
+      "to_class_id": "sword_lord",
+      "minimum_level": 7,
+      "reset_level": true,
+      "stat_floors": {
+        "max_hp": 28,
+        "strength": 10,
+        "magic": 1,
+        "skill": 9,
+        "speed": 9,
+        "luck": 5,
+        "defense": 7,
+        "resistance": 3
+      }
+    },
+    {
+      "from_class_id": "scout",
+      "to_class_id": "bow_knight",
+      "minimum_level": 7,
+      "reset_level": true,
+      "stat_floors": {
+        "max_hp": 26,
+        "strength": 9,
+        "magic": 1,
+        "skill": 11,
+        "speed": 11,
+        "luck": 7,
+        "defense": 6,
+        "resistance": 4
+      }
+    },
+    {
+      "from_class_id": "soldier",
+      "to_class_id": "royal_lancer",
+      "minimum_level": 7,
+      "reset_level": true,
+      "stat_floors": {
+        "max_hp": 31,
+        "strength": 11,
+        "magic": 0,
+        "skill": 9,
+        "speed": 7,
+        "luck": 4,
+        "defense": 10,
+        "resistance": 3
+      }
+    },
+    {
+      "from_class_id": "mage",
+      "to_class_id": "sage",
+      "minimum_level": 12,
+      "reset_level": true,
+      "stat_floors": {
+        "max_hp": 24,
+        "strength": 2,
+        "magic": 11,
+        "skill": 10,
+        "speed": 10,
+        "luck": 6,
+        "defense": 4,
+        "resistance": 9
+      }
+    }
+  ]
+}
