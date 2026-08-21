@@ -34,6 +34,33 @@ public sealed class LevelUpResult
 }
 
 /// <summary>
+/// 保存一次转职产生的职业与属性变化。
+/// UI 只消费结果文本，不参与真正的属性修改。
+/// </summary>
+public sealed class PromotionResult
+{
+    /// <summary>创建一次转职结果。</summary>
+    public PromotionResult(
+        string previousClassName,
+        string newClassName,
+        IReadOnlyList<string> statChanges)
+    {
+        PreviousClassName = previousClassName;
+        NewClassName = newClassName;
+        StatChanges = statChanges;
+    }
+
+    /// <summary>转职前职业名称。</summary>
+    public string PreviousClassName { get; }
+
+    /// <summary>转职后职业名称。</summary>
+    public string NewClassName { get; }
+
+    /// <summary>因为新职业属性基准而获得的提升。</summary>
+    public IReadOnlyList<string> StatChanges { get; }
+}
+
+/// <summary>
 /// 保存一个战棋单位在运行时所需的数据。
 /// 模型本身不依赖具体 UI，因此可以安全地由 JSON、Resource 或存档创建。
 /// </summary>
@@ -91,8 +118,11 @@ public sealed class UnitModel
     /// <summary>单位当前所在的逻辑格子坐标。</summary>
     public Vector2I GridPosition { get; set; }
 
-    /// <summary>当前职业定义。</summary>
-    public UnitClassDefinition ClassDefinition { get; }
+    /// <summary>
+    /// 当前职业定义。
+    /// 只能由构造、受控转职或已经验证过的存档恢复入口修改。
+    /// </summary>
+    public UnitClassDefinition ClassDefinition { get; private set; }
 
     /// <summary>当前装备的武器或法术。</summary>
     public WeaponDefinition EquippedWeapon { get; private set; }
@@ -193,6 +223,50 @@ public sealed class UnitModel
     }
 
     /// <summary>
+    /// 按已经验证过的转职规则切换职业，并把低于新职业基准的属性补足。
+    /// 高于基准的成长完全保留；最大 HP 提升时当前 HP 同步增加相同数值，避免转职反而降低当前生命比例。
+    /// </summary>
+    public PromotionResult PromoteTo(
+        UnitClassDefinition targetClass,
+        PromotionStatFloor statFloor,
+        bool resetLevel)
+    {
+        if (Team != UnitTeam.Player)
+        {
+            throw new InvalidOperationException("当前基础转职系统只允许玩家单位转职。");
+        }
+
+        string previousClassName = ClassDefinition.DisplayName;
+        List<string> changes = new();
+
+        if (MaxHp < statFloor.MaxHp)
+        {
+            int increase = statFloor.MaxHp - MaxHp;
+            MaxHp = statFloor.MaxHp;
+            CurrentHp = Mathf.Min(MaxHp, CurrentHp + increase);
+            changes.Add($"HP +{increase}");
+        }
+
+        Strength = ApplyPromotionFloor(Strength, statFloor.Strength, "力量", changes);
+        Magic = ApplyPromotionFloor(Magic, statFloor.Magic, "魔力", changes);
+        Skill = ApplyPromotionFloor(Skill, statFloor.Skill, "技巧", changes);
+        Speed = ApplyPromotionFloor(Speed, statFloor.Speed, "速度", changes);
+        Luck = ApplyPromotionFloor(Luck, statFloor.Luck, "幸运", changes);
+        Defense = ApplyPromotionFloor(Defense, statFloor.Defense, "防御", changes);
+        Resistance = ApplyPromotionFloor(Resistance, statFloor.Resistance, "魔防", changes);
+
+        ClassDefinition = targetClass;
+        if (resetLevel)
+        {
+            // 采用经典分阶段职业成长方式：晋升后从新职业 Lv.1 重新成长。
+            Level = 1;
+            Experience = 0;
+        }
+
+        return new PromotionResult(previousClassName, targetClass.DisplayName, changes);
+    }
+
+    /// <summary>
     /// 获得经验值，并执行所有达到 100 经验触发的升级。
     /// 返回每次升级结果，方便界面展示成长属性。
     /// </summary>
@@ -214,10 +288,11 @@ public sealed class UnitModel
 
     /// <summary>
     /// 从已经验证过的本地存档恢复可变化的运行时状态。
-    /// 固定 ID、名称、阵营、职业定义和成长率仍由原始角色/章节数据提供，防止存档覆盖规则定义。
+    /// 职业和装备必须由当前版本的数据目录先解析成功，存档本身不能注入新的规则定义。
     /// </summary>
     public void RestoreRuntimeState(
         Vector2I gridPosition,
+        UnitClassDefinition classDefinition,
         WeaponDefinition equippedWeapon,
         int level,
         int experience,
@@ -233,6 +308,7 @@ public sealed class UnitModel
         bool hasActed)
     {
         GridPosition = gridPosition;
+        ClassDefinition = classDefinition;
         EquippedWeapon = equippedWeapon;
         Level = Mathf.Max(1, level);
         Experience = Mathf.Clamp(experience, 0, 99);
@@ -254,6 +330,24 @@ public sealed class UnitModel
     public void ResetForNewTurn()
     {
         HasActed = false;
+    }
+
+    /// <summary>把单项属性补到转职基准，并记录实际增加值。</summary>
+    private static int ApplyPromotionFloor(
+        int currentValue,
+        int floorValue,
+        string displayName,
+        ICollection<string> changes)
+    {
+        int safeFloor = Mathf.Max(0, floorValue);
+        if (currentValue >= safeFloor)
+        {
+            return currentValue;
+        }
+
+        int increase = safeFloor - currentValue;
+        changes.Add($"{displayName} +{increase}");
+        return safeFloor;
     }
 
     /// <summary>
