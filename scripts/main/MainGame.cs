@@ -1,4 +1,5 @@
 using FlameEmblem.Game;
+using FlameEmblem.Visual;
 using Godot;
 
 namespace FlameEmblem.Main;
@@ -14,6 +15,9 @@ public partial class MainGame : Node2D
 
     /// <summary>地图左上角在窗口中的绘制偏移。</summary>
     private static readonly Vector2 BoardOrigin = new(40, 100);
+
+    /// <summary>敌军战斗结果发布后等待横向演出真正启动的安全时间。</summary>
+    private const double EnemyBattleStartGraceSeconds = 0.20;
 
     /// <summary>当前章节地图宽度。</summary>
     private int _gridWidth = 15;
@@ -53,6 +57,30 @@ public partial class MainGame : Node2D
 
     /// <summary>最近一次完整战斗交换的表现文本。</summary>
     private string _lastBattleLog = "尚未发生战斗。";
+
+    /// <summary>地图人物表现协调器，用于敌军逐个行动时等待真实移动动画结束。</summary>
+    private CharacterVisualCoordinator? _characterVisualCoordinator;
+
+    /// <summary>本次敌军回合尚未行动的单位队列，保持章节部署顺序。</summary>
+    private readonly Queue<UnitModel> _enemyTurnQueue = new();
+
+    /// <summary>本次敌军回合累积的战斗记录，回到玩家阶段时统一显示。</summary>
+    private readonly List<string> _enemyTurnLog = new();
+
+    /// <summary>当前正在执行的敌军单位。</summary>
+    private UnitModel? _activeEnemyUnit;
+
+    /// <summary>当前敌军本次行动锁定的玩家目标。</summary>
+    private UnitModel? _activeEnemyTarget;
+
+    /// <summary>敌军逐单位行动的当前步骤。</summary>
+    private EnemyTurnSequenceStep _enemyTurnStep = EnemyTurnSequenceStep.Idle;
+
+    /// <summary>等待敌军横向战斗演出启动/结束时累计的安全时间。</summary>
+    private double _enemyBattleWaitElapsed;
+
+    /// <summary>当前敌军攻击是否已经观察到横向战斗演出真正进入播放状态。</summary>
+    private bool _enemyBattlePlaybackObserved;
 
     /// <summary>HUD 章节标题。</summary>
     private Label? _titleLabel;
@@ -96,11 +124,12 @@ public partial class MainGame : Node2D
     public override void _Ready()
     {
         CreateHud();
+        _characterVisualCoordinator = GetNodeOrNull<CharacterVisualCoordinator>("CharacterVisualCoordinator");
 
         try
         {
             LoadChapter();
-            UpdateHud("选择一个蓝色单位开始行动。移动后选择攻击范围内的敌军即可查看完整战斗预测。");
+            UpdateHud("选择一个蓝色单位开始行动。可以直接攻击，也可以移动后再行动。");
         }
         catch (Exception exception)
         {
@@ -111,6 +140,39 @@ public partial class MainGame : Node2D
         }
 
         QueueRedraw();
+    }
+
+    /// <summary>
+    /// 敌军阶段按帧推进一个很小的状态机。
+    /// 每名敌军必须完成“移动动画 -> 战斗演出 -> 下一名敌军”，不会再在同一 C# 调用中把整回合全部结算完。
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        if (_phase != BattlePhase.Enemy || _enemyTurnStep == EnemyTurnSequenceStep.Idle)
+        {
+            return;
+        }
+
+        // 战斗结果发布后，横向演出对敌军攻击会先做一次移动门控；这里单独等待它真正开始并结束。
+        if (_enemyTurnStep == EnemyTurnSequenceStep.WaitForBattlePresentation)
+        {
+            AdvanceEnemyBattlePresentationWait(delta);
+            return;
+        }
+
+        // 玩家最后一次攻击的演出也可能延续到敌军阶段开始以后；任何演出期间都不推进下一名敌军。
+        if (BattleAnimationBus.IsPlaybackActive)
+        {
+            return;
+        }
+
+        // 逻辑坐标先变化，地图人物层随后逐格补动画；敌军必须等人物真正走到终点再判断攻击。
+        if (_characterVisualCoordinator?.IsMovementAnimating ?? false)
+        {
+            return;
+        }
+
+        AdvanceEnemyTurnSequence();
     }
 
     /// <summary>
@@ -293,7 +355,7 @@ public partial class MainGame : Node2D
             _selectedUnitHasMoved = true;
             _pendingAttackTarget = null;
             _reachableCells = new HashSet<Vector2I> { cell };
-            UpdateHud($"{_selectedUnit.DisplayName} 已移动。请选择攻击范围内敌军查看预测，或点击“等待”。");
+            UpdateHud($"{_selectedUnit.DisplayName} 已移动。请选择攻击范围内敌军，或点击“等待”。");
             QueueRedraw();
         }
     }
@@ -328,7 +390,7 @@ public partial class MainGame : Node2D
     }
 
     /// <summary>
-    /// 设置当前攻击目标并刷新战斗预测窗口。
+    /// 设置当前攻击目标并刷新 HUD。
     /// </summary>
     private void SetPendingAttackTarget(UnitModel enemy)
     {
@@ -338,7 +400,7 @@ public partial class MainGame : Node2D
         }
 
         _pendingAttackTarget = enemy;
-        UpdateHud($"已锁定 {enemy.DisplayName}。确认预测后点击“确认攻击”。");
+        UpdateHud($"已锁定 {enemy.DisplayName}。点击“确认攻击”开始战斗。");
         QueueRedraw();
     }
 
@@ -354,7 +416,7 @@ public partial class MainGame : Node2D
 
     /// <summary>
     /// 使用带权最短路计算单位在当前地图上的可达格。
-    /// 平地/桥面消耗 1，森林消耗 2，河流不可进入，其他存活单位视为阻挡。
+    /// 同阵营单位可以作为路径中间格经过但不能作为终点；敌对单位完全阻挡。
     /// </summary>
     private HashSet<Vector2I> CalculateReachableCells(UnitModel unit)
     {
@@ -376,8 +438,17 @@ public partial class MainGame : Node2D
             foreach (Vector2I direction in CardinalDirections())
             {
                 Vector2I next = current + direction;
-                if (!IsInsideBoard(next) || IsOccupiedByOtherUnit(next, unit))
+                if (!IsInsideBoard(next))
                 {
+                    continue;
+                }
+
+                UnitModel? occupant = FindLivingUnitAt(next);
+                if (occupant is not null &&
+                    !ReferenceEquals(occupant, unit) &&
+                    occupant.Team != unit.Team)
+                {
+                    // 敌对单位不能被穿过，也不能把它所在格作为移动终点。
                     continue;
                 }
 
@@ -403,11 +474,14 @@ public partial class MainGame : Node2D
             }
         }
 
-        return bestCosts.Keys.ToHashSet();
+        // 同阵营单位所在格只允许“经过”，最终返回的蓝色/敌军候选终点必须为空或是单位自己的起点。
+        return bestCosts.Keys
+            .Where(cell => cell == unit.GridPosition || FindLivingUnitAt(cell) is null)
+            .ToHashSet();
     }
 
     /// <summary>
-    /// 玩家确认预测后执行带命中、必杀、反击、追击与魔法 HP 消耗的完整战斗交换。
+    /// 玩家确认目标后执行带命中、必杀、反击、追击与魔法 HP 消耗的完整战斗交换。
     /// </summary>
     private void OnConfirmAttackPressed()
     {
@@ -518,75 +592,234 @@ public partial class MainGame : Node2D
     }
 
     /// <summary>
-    /// 执行一整个规则驱动的敌军回合。
-    /// 敌军只使用固定目标选择/移动规则；战斗中的命中和必杀属于普通游戏随机数，不是生成式 AI。
+    /// 初始化逐单位敌军回合。
+    /// 这里只建立队列，不在当前调用栈里移动或结算任何敌军，真正执行交给 _Process 状态机。
     /// </summary>
     private void RunEnemyTurn()
     {
-        if (_phase is BattlePhase.Victory or BattlePhase.Defeat)
+        if (_phase is BattlePhase.Victory or BattlePhase.Defeat or BattlePhase.Enemy)
         {
             return;
         }
 
         _phase = BattlePhase.Enemy;
         ClearSelection();
-        List<string> turnLog = new();
+        ResetEnemyTurnSequence();
 
-        foreach (UnitModel enemy in _units.Where(unit => unit.IsAlive && unit.Team == UnitTeam.Enemy).ToList())
+        foreach (UnitModel enemy in _units.Where(unit => unit.IsAlive && unit.Team == UnitTeam.Enemy))
         {
-            UnitModel? target = EnemyTurnController.FindNearestPlayer(enemy, _units);
+            _enemyTurnQueue.Enqueue(enemy);
+        }
+
+        _enemyTurnStep = EnemyTurnSequenceStep.SelectNextUnit;
+        UpdateHud("敌军回合开始。敌军将依次移动并完成各自战斗。");
+        QueueRedraw();
+    }
+
+    /// <summary>推进一次敌军状态机；每次调用最多只进入一个新步骤。</summary>
+    private void AdvanceEnemyTurnSequence()
+    {
+        switch (_enemyTurnStep)
+        {
+            case EnemyTurnSequenceStep.SelectNextUnit:
+                SelectNextEnemyUnit();
+                break;
+            case EnemyTurnSequenceStep.WaitForMovement:
+                _enemyTurnStep = EnemyTurnSequenceStep.ResolveAttack;
+                break;
+            case EnemyTurnSequenceStep.ResolveAttack:
+                ResolveActiveEnemyAttack();
+                break;
+            default:
+                break;
+        }
+    }
+
+    /// <summary>从敌军队列选择下一名仍然存活的单位，并决定是否需要先移动。</summary>
+    private void SelectNextEnemyUnit()
+    {
+        _activeEnemyUnit = null;
+        _activeEnemyTarget = null;
+
+        while (_enemyTurnQueue.Count > 0)
+        {
+            UnitModel candidate = _enemyTurnQueue.Dequeue();
+            if (!candidate.IsAlive)
+            {
+                continue;
+            }
+
+            UnitModel? target = EnemyTurnController.FindNearestPlayer(candidate, _units);
             if (target is null)
             {
-                break;
+                FinishEnemyTurnSequence();
+                return;
             }
 
-            // 如果当前位置不在射程内，就先在可达范围中选择更接近目标的格子。
-            if (!CombatRules.IsInAttackRange(enemy, target))
+            _activeEnemyUnit = candidate;
+            _activeEnemyTarget = target;
+
+            if (!CombatRules.IsInAttackRange(candidate, target))
             {
-                HashSet<Vector2I> reachable = CalculateReachableCells(enemy);
-                Vector2I destination = EnemyTurnController.ChooseMoveDestination(enemy, target, reachable);
-                enemy.GridPosition = destination;
-            }
-
-            if (CombatRules.CanAttack(enemy, target))
-            {
-                TerrainDefinition enemyTerrain = TerrainRules.Get(TerrainAt(enemy.GridPosition));
-                TerrainDefinition targetTerrain = TerrainRules.Get(TerrainAt(target.GridPosition));
-                CombatExchangeResult exchange = CombatResolver.ResolveExchange(
-                    enemy,
-                    target,
-                    enemyTerrain,
-                    targetTerrain,
-                    _combatRandom);
-
-                string exchangeText = BattlePresentationFormatter.FormatExchange(exchange);
-                turnLog.Add(exchangeText);
-                _lastBattleLog = exchangeText;
-
-                // 玩家作为防守方只要实际完成了至少一次反击，也可以获得经验与击倒奖励。
-                if (exchange.Strikes.Any(strike => ReferenceEquals(strike.Attacker, target)))
+                HashSet<Vector2I> reachable = CalculateReachableCells(candidate);
+                Vector2I destination = EnemyTurnController.ChooseMoveDestination(candidate, target, reachable);
+                if (destination != candidate.GridPosition)
                 {
-                    bool enemyDefeated = !enemy.IsAlive;
-                    turnLog.Add(GrantCombatExperience(target, enemy, enemyDefeated).Trim());
+                    candidate.GridPosition = destination;
+                    _enemyTurnStep = EnemyTurnSequenceStep.WaitForMovement;
+                    UpdateHud($"敌军行动：{candidate.DisplayName} 向 {target.DisplayName} 推进。");
+                    QueueRedraw();
+                    return;
                 }
             }
 
-            CheckBattleOutcome();
-            if (_phase is BattlePhase.Victory or BattlePhase.Defeat)
-            {
-                break;
-            }
-        }
-
-        if (_phase is BattlePhase.Victory or BattlePhase.Defeat)
-        {
+            _enemyTurnStep = EnemyTurnSequenceStep.ResolveAttack;
+            UpdateHud($"敌军行动：{candidate.DisplayName} 准备行动。");
+            QueueRedraw();
             return;
         }
 
-        string previousEnemyTurnLog = turnLog.Count == 0
+        FinishEnemyTurnSequence();
+    }
+
+    /// <summary>移动结束后判断当前敌军是否可以攻击，并只结算这一场战斗。</summary>
+    private void ResolveActiveEnemyAttack()
+    {
+        UnitModel? enemy = _activeEnemyUnit;
+        if (enemy is null || !enemy.IsAlive)
+        {
+            CompleteActiveEnemyUnit();
+            return;
+        }
+
+        UnitModel? target = _activeEnemyTarget;
+        if (target is null || !target.IsAlive)
+        {
+            target = EnemyTurnController.FindNearestPlayer(enemy, _units);
+            _activeEnemyTarget = target;
+        }
+
+        if (target is null)
+        {
+            FinishEnemyTurnSequence();
+            return;
+        }
+
+        if (!CombatRules.CanAttack(enemy, target))
+        {
+            CompleteActiveEnemyUnit();
+            return;
+        }
+
+        TerrainDefinition enemyTerrain = TerrainRules.Get(TerrainAt(enemy.GridPosition));
+        TerrainDefinition targetTerrain = TerrainRules.Get(TerrainAt(target.GridPosition));
+        CombatExchangeResult exchange = CombatResolver.ResolveExchange(
+            enemy,
+            target,
+            enemyTerrain,
+            targetTerrain,
+            _combatRandom);
+
+        string exchangeText = BattlePresentationFormatter.FormatExchange(exchange);
+        _enemyTurnLog.Add(exchangeText);
+        _lastBattleLog = exchangeText;
+
+        // 玩家作为防守方只要实际完成了至少一次反击，也可以获得经验与击倒奖励。
+        if (exchange.Strikes.Any(strike => ReferenceEquals(strike.Attacker, target)))
+        {
+            bool enemyDefeated = !enemy.IsAlive;
+            string experienceText = GrantCombatExperience(target, enemy, enemyDefeated).Trim();
+            if (!string.IsNullOrWhiteSpace(experienceText))
+            {
+                _enemyTurnLog.Add(experienceText);
+            }
+        }
+
+        CheckBattleOutcome();
+        if (_phase is BattlePhase.Victory or BattlePhase.Defeat)
+        {
+            // 胜负已经锁定时不再安排其他敌军，但当前横向战斗演出仍可自行播放完成。
+            ResetEnemyTurnSequence();
+            return;
+        }
+
+        _enemyBattleWaitElapsed = 0.0;
+        _enemyBattlePlaybackObserved = false;
+        _enemyTurnStep = EnemyTurnSequenceStep.WaitForBattlePresentation;
+    }
+
+    /// <summary>
+    /// 等待敌军战斗演出真正启动并结束。
+    /// 演出协调器对敌军攻击有一个很短的移动门控，因此不能在 ResolveExchange 返回后立刻进入下一名敌军。
+    /// </summary>
+    private void AdvanceEnemyBattlePresentationWait(double delta)
+    {
+        if (BattleAnimationBus.IsPlaybackActive)
+        {
+            _enemyBattlePlaybackObserved = true;
+            return;
+        }
+
+        _enemyBattleWaitElapsed += Math.Max(0.0, delta);
+
+        // 只要曾经观察到播放状态，当前 false 就表示这一场演出已经完整结束。
+        if (_enemyBattlePlaybackObserved)
+        {
+            CompleteActiveEnemyUnit();
+            return;
+        }
+
+        // 正常情况下约 0.05 秒就会开始；安全门限防止表现层异常时敌军回合永久卡死。
+        if (_enemyBattleWaitElapsed >= EnemyBattleStartGraceSeconds)
+        {
+            CompleteActiveEnemyUnit();
+        }
+    }
+
+    /// <summary>结束当前敌军的行动并在下一帧选择下一名敌军。</summary>
+    private void CompleteActiveEnemyUnit()
+    {
+        CheckBattleOutcome();
+        if (_phase is BattlePhase.Victory or BattlePhase.Defeat)
+        {
+            ResetEnemyTurnSequence();
+            return;
+        }
+
+        _activeEnemyUnit = null;
+        _activeEnemyTarget = null;
+        _enemyBattleWaitElapsed = 0.0;
+        _enemyBattlePlaybackObserved = false;
+        _enemyTurnStep = EnemyTurnSequenceStep.SelectNextUnit;
+    }
+
+    /// <summary>所有敌军完成行动以后汇总日志并进入下一玩家回合。</summary>
+    private void FinishEnemyTurnSequence()
+    {
+        if (_phase is BattlePhase.Victory or BattlePhase.Defeat)
+        {
+            ResetEnemyTurnSequence();
+            return;
+        }
+
+        string previousEnemyTurnLog = _enemyTurnLog.Count == 0
             ? "敌军本回合没有发生有效战斗。"
-            : string.Join("\n", turnLog);
+            : string.Join("\n", _enemyTurnLog);
+
+        ResetEnemyTurnSequence();
         StartNextPlayerTurn(previousEnemyTurnLog);
+    }
+
+    /// <summary>清空敌军状态机临时数据；不会改变当前 BattlePhase。</summary>
+    private void ResetEnemyTurnSequence()
+    {
+        _enemyTurnQueue.Clear();
+        _enemyTurnLog.Clear();
+        _activeEnemyUnit = null;
+        _activeEnemyTarget = null;
+        _enemyBattleWaitElapsed = 0.0;
+        _enemyBattlePlaybackObserved = false;
+        _enemyTurnStep = EnemyTurnSequenceStep.Idle;
     }
 
     /// <summary>
@@ -729,61 +962,14 @@ public partial class MainGame : Node2D
     }
 
     /// <summary>
-    /// 根据当前攻击目标刷新完整战斗预测窗口。
+    /// 战斗预测已经从最终右侧界面移除；保留该控件引用只为兼容旧 HUD 创建顺序。
     /// </summary>
     private void UpdateForecastHud()
     {
-        if (_forecastLabel is null)
+        if (_forecastLabel is not null)
         {
-            return;
+            _forecastLabel.Text = string.Empty;
         }
-
-        if (_selectedUnit is null || _pendingAttackTarget is null)
-        {
-            _forecastLabel.Text = "战斗预测：选择攻击范围内敌军后显示伤害 / 命中 / 必杀 / 追击。";
-            return;
-        }
-
-        TerrainDefinition attackerTerrain = TerrainRules.Get(TerrainAt(_selectedUnit.GridPosition));
-        TerrainDefinition defenderTerrain = TerrainRules.Get(TerrainAt(_pendingAttackTarget.GridPosition));
-        CombatForecast forecast = CombatRules.CreateForecast(
-            _selectedUnit,
-            _pendingAttackTarget,
-            attackerTerrain.DefenseBonus,
-            attackerTerrain.AvoidBonus,
-            defenderTerrain.DefenseBonus,
-            defenderTerrain.AvoidBonus);
-
-        string attackerMultiplier = forecast.AttackerStrikeCount > 1
-            ? $" ×{forecast.AttackerStrikeCount}"
-            : string.Empty;
-        string attackerCost = _selectedUnit.EquippedWeapon.HpCost > 0
-            ? $" | 每次消耗 {_selectedUnit.EquippedWeapon.HpCost} HP"
-            : string.Empty;
-
-        string counterText;
-        if (!forecast.DefenderCanCounter)
-        {
-            counterText = "敌方无法反击";
-        }
-        else
-        {
-            string defenderMultiplier = forecast.DefenderStrikeCount > 1
-                ? $" ×{forecast.DefenderStrikeCount}"
-                : string.Empty;
-            string defenderCost = _pendingAttackTarget.EquippedWeapon.HpCost > 0
-                ? $" | 每次消耗 {_pendingAttackTarget.EquippedWeapon.HpCost} HP"
-                : string.Empty;
-            counterText =
-                $"反击：{_pendingAttackTarget.EquippedWeapon.DisplayName} | 伤害 {forecast.DefenderCounterDamage}{defenderMultiplier} | " +
-                $"命中 {forecast.DefenderHitRate}% | 必杀 {forecast.DefenderCriticalRate}%{defenderCost}";
-        }
-
-        _forecastLabel.Text =
-            $"战斗预测\n{_selectedUnit.DisplayName} → {_pendingAttackTarget.DisplayName}\n" +
-            $"{_selectedUnit.EquippedWeapon.DisplayName} | 伤害 {forecast.AttackerDamage}{attackerMultiplier} | " +
-            $"命中 {forecast.AttackerHitRate}% | 必杀 {forecast.AttackerCriticalRate}%{attackerCost}\n" +
-            counterText;
     }
 
     /// <summary>
@@ -1053,6 +1239,16 @@ public partial class MainGame : Node2D
             BattlePhase.Defeat => "结束",
             _ => "未知"
         };
+    }
+
+    /// <summary>敌军逐单位行动状态。</summary>
+    private enum EnemyTurnSequenceStep
+    {
+        Idle,
+        SelectNextUnit,
+        WaitForMovement,
+        ResolveAttack,
+        WaitForBattlePresentation
     }
 
     /// <summary>
