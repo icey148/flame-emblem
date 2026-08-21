@@ -119,7 +119,7 @@ public partial class CharacterDetailOverlay : PanelContainer
     }
 
     /// <summary>
-    /// 打开指定人物的详情页，并把键盘焦点交给关闭按钮，保证 Esc/Enter 等 GUI 输入稳定。
+    /// 打开指定人物的详情页，并把键盘焦点交给关闭按钮，保证键盘取消输入稳定。
     /// </summary>
     public void ShowUnit(UnitModel unit)
     {
@@ -142,28 +142,41 @@ public partial class CharacterDetailOverlay : PanelContainer
     }
 
     /// <summary>
-    /// 详情页可见时允许 Esc 或右键立即关闭。
-    /// 这些入口独立于按钮布局，即使以后详情内容继续增加也不会再次出现“打不开关闭按钮”的问题。
+    /// GUI 内部的右键会先到这里，因此必须在控件层直接处理，不能只依赖 _UnhandledInput。
     /// </summary>
-    public override void _UnhandledInput(InputEvent @event)
+    public override void _GuiInput(InputEvent @event)
     {
-        if (!Visible)
+        if (!Visible || !IsCloseInput(@event))
         {
             return;
         }
 
-        bool cancelPressed = @event.IsActionPressed("ui_cancel");
-        bool rightClickPressed = @event is InputEventMouseButton mouseButton &&
-                                 mouseButton.ButtonIndex == MouseButton.Right &&
-                                 mouseButton.Pressed;
+        HideOverlay();
+        AcceptEvent();
+    }
 
-        if (!cancelPressed && !rightClickPressed)
+    /// <summary>
+    /// 详情页可见时允许 Esc 或未被 GUI 消耗的右键立即关闭。
+    /// </summary>
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (!Visible || !IsCloseInput(@event))
         {
             return;
         }
 
         HideOverlay();
         GetViewport().SetInputAsHandled();
+    }
+
+    /// <summary>判断输入是否属于详情页关闭操作。</summary>
+    private static bool IsCloseInput(InputEvent @event)
+    {
+        bool cancelPressed = @event.IsActionPressed("ui_cancel");
+        bool rightClickPressed = @event is InputEventMouseButton mouseButton &&
+                                 mouseButton.ButtonIndex == MouseButton.Right &&
+                                 mouseButton.Pressed;
+        return cancelPressed || rightClickPressed;
     }
 
     /// <summary>
