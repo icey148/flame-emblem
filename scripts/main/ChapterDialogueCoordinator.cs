@@ -114,7 +114,7 @@ public partial class ChapterDialogueCoordinator : Node
         }
     }
 
-    /// <summary>创建全屏输入屏蔽与底部复古双头像对话框。</summary>
+    /// <summary>创建全屏输入屏蔽与底部双头像对话框。</summary>
     private void CreateDialogueInterface()
     {
         CanvasLayer layer = new()
@@ -126,7 +126,7 @@ public partial class ChapterDialogueCoordinator : Node
         _dialogueRoot = new Control
         {
             Position = Vector2.Zero,
-            Size = new Vector2(1280, 720),
+            Size = ReferenceBattleLayout.ViewportSize,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Visible = false
         };
@@ -136,8 +136,8 @@ public partial class ChapterDialogueCoordinator : Node
         ColorRect blocker = new()
         {
             Position = Vector2.Zero,
-            Size = new Vector2(1280, 720),
-            Color = new Color(0.03f, 0.045f, 0.055f, 0.38f),
+            Size = ReferenceBattleLayout.ViewportSize,
+            Color = new Color(0.0f, 0.0f, 0.0f, 0.48f),
             MouseFilter = Control.MouseFilterEnum.Stop
         };
         blocker.GuiInput += OnBlockerGuiInput;
@@ -145,23 +145,11 @@ public partial class ChapterDialogueCoordinator : Node
 
         PanelContainer panel = new()
         {
-            Position = new Vector2(45, 462),
-            Size = new Vector2(1190, 223),
+            Position = new Vector2(45, 458),
+            Size = new Vector2(1190, 228),
             MouseFilter = Control.MouseFilterEnum.Stop
         };
-        panel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
-        {
-            BgColor = new Color("182231"),
-            BorderColor = new Color("8b7757"),
-            BorderWidthLeft = 3,
-            BorderWidthTop = 3,
-            BorderWidthRight = 3,
-            BorderWidthBottom = 3,
-            CornerRadiusTopLeft = 0,
-            CornerRadiusTopRight = 0,
-            CornerRadiusBottomLeft = 0,
-            CornerRadiusBottomRight = 0
-        });
+        panel.AddThemeStyleboxOverride("panel", BuildDialoguePanelStyle());
         _dialogueRoot.AddChild(panel);
 
         VBoxContainer outerColumn = new();
@@ -169,21 +157,22 @@ public partial class ChapterDialogueCoordinator : Node
 
         HBoxContainer dialogueRow = new()
         {
-            CustomMinimumSize = new Vector2(1160, 168)
+            CustomMinimumSize = new Vector2(1160, 170)
         };
         outerColumn.AddChild(dialogueRow);
 
         _leftPortrait = new CharacterPortraitControl
         {
-            CustomMinimumSize = new Vector2(170, 164),
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            CustomMinimumSize = new Vector2(170, 166),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         dialogueRow.AddChild(_leftPortrait);
         AttachTeamFrame(_leftPortrait, "LeftTeamFrame");
 
         VBoxContainer textColumn = new()
         {
-            CustomMinimumSize = new Vector2(805, 164),
+            CustomMinimumSize = new Vector2(805, 166),
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
         };
         dialogueRow.AddChild(textColumn);
@@ -191,10 +180,11 @@ public partial class ChapterDialogueCoordinator : Node
         _speakerLabel = new Label
         {
             Text = "",
-            CustomMinimumSize = new Vector2(780, 36)
+            CustomMinimumSize = new Vector2(780, 38)
         };
+        _speakerLabel.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
         _speakerLabel.AddThemeFontSizeOverride("font_size", 22);
-        _speakerLabel.AddThemeColorOverride("font_shadow_color", new Color(0.02f, 0.03f, 0.05f, 0.95f));
+        _speakerLabel.AddThemeColorOverride("font_shadow_color", Colors.Black);
         _speakerLabel.AddThemeConstantOverride("shadow_offset_x", 2);
         _speakerLabel.AddThemeConstantOverride("shadow_offset_y", 2);
         textColumn.AddChild(_speakerLabel);
@@ -206,21 +196,26 @@ public partial class ChapterDialogueCoordinator : Node
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             VerticalAlignment = VerticalAlignment.Center
         };
+        _textLabel.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
         _textLabel.AddThemeFontSizeOverride("font_size", 19);
-        _textLabel.AddThemeColorOverride("font_color", new Color("eee8d8"));
+        _textLabel.AddThemeColorOverride("font_color", new Color("f3f3ef"));
+        _textLabel.AddThemeColorOverride("font_shadow_color", Colors.Black);
+        _textLabel.AddThemeConstantOverride("shadow_offset_x", 1);
+        _textLabel.AddThemeConstantOverride("shadow_offset_y", 1);
         textColumn.AddChild(_textLabel);
 
         _rightPortrait = new CharacterPortraitControl
         {
-            CustomMinimumSize = new Vector2(170, 164),
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            CustomMinimumSize = new Vector2(170, 166),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         dialogueRow.AddChild(_rightPortrait);
         AttachTeamFrame(_rightPortrait, "RightTeamFrame");
 
         HBoxContainer commandRow = new()
         {
-            CustomMinimumSize = new Vector2(1160, 40),
+            CustomMinimumSize = new Vector2(1160, 42),
             Alignment = BoxContainer.AlignmentMode.End
         };
         outerColumn.AddChild(commandRow);
@@ -231,24 +226,66 @@ public partial class ChapterDialogueCoordinator : Node
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             VerticalAlignment = VerticalAlignment.Center
         };
+        _progressLabel.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
         _progressLabel.AddThemeColorOverride("font_color", new Color("b8bdc6"));
         commandRow.AddChild(_progressLabel);
 
-        Button skipButton = new()
-        {
-            Text = "跳过",
-            CustomMinimumSize = new Vector2(105, 34)
-        };
+        Button skipButton = CreateDialogueButton("跳过", new Vector2(105, 34));
         skipButton.Pressed += FinishSequence;
         commandRow.AddChild(skipButton);
 
-        _nextButton = new Button
-        {
-            Text = "继续",
-            CustomMinimumSize = new Vector2(125, 34)
-        };
+        _nextButton = CreateDialogueButton("继续", new Vector2(125, 34));
         _nextButton.Pressed += AdvanceLine;
         commandRow.AddChild(_nextButton);
+    }
+
+    /// <summary>创建黑底白框的对话面板，避免旧青铜/灰蓝边框和新像素头像冲突。</summary>
+    private static StyleBoxFlat BuildDialoguePanelStyle()
+    {
+        return new StyleBoxFlat
+        {
+            BgColor = new Color("0b0d12"),
+            BorderColor = new Color("f3f3ef"),
+            BorderWidthLeft = 3,
+            BorderWidthTop = 3,
+            BorderWidthRight = 3,
+            BorderWidthBottom = 3,
+            CornerRadiusTopLeft = 0,
+            CornerRadiusTopRight = 0,
+            CornerRadiusBottomLeft = 0,
+            CornerRadiusBottomRight = 0
+        };
+    }
+
+    /// <summary>创建与对话框一致的硬边按钮。</summary>
+    private static Button CreateDialogueButton(string text, Vector2 minimumSize)
+    {
+        Button button = new()
+        {
+            Text = text,
+            CustomMinimumSize = minimumSize
+        };
+        button.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
+        button.AddThemeFontSizeOverride("font_size", 15);
+        button.AddThemeColorOverride("font_color", new Color("f3f3ef"));
+        button.AddThemeStyleboxOverride("normal", BuildDialogueButtonStyle(new Color("0b0d12")));
+        button.AddThemeStyleboxOverride("hover", BuildDialogueButtonStyle(new Color("171a22")));
+        button.AddThemeStyleboxOverride("pressed", BuildDialogueButtonStyle(new Color("252a34")));
+        return button;
+    }
+
+    /// <summary>创建按钮不同状态共用的白色硬边框。</summary>
+    private static StyleBoxFlat BuildDialogueButtonStyle(Color background)
+    {
+        return new StyleBoxFlat
+        {
+            BgColor = background,
+            BorderColor = new Color("f3f3ef"),
+            BorderWidthLeft = 2,
+            BorderWidthTop = 2,
+            BorderWidthRight = 2,
+            BorderWidthBottom = 2
+        };
     }
 
     /// <summary>给一个对话头像挂载深蓝/粉红阵营边框。</summary>
@@ -362,7 +399,7 @@ public partial class ChapterDialogueCoordinator : Node
             _speakerLabel.AddThemeColorOverride(
                 "font_color",
                 speaker is null
-                    ? new Color("eee2c7")
+                    ? new Color("f3f3ef")
                     : TeamVisualPalette.Highlight(speaker.Team));
         }
 
@@ -384,11 +421,11 @@ public partial class ChapterDialogueCoordinator : Node
         }
     }
 
-    /// <summary>当前说话者保持明亮，另一侧保留可见但压暗，形成明确的对话焦点。</summary>
+    /// <summary>当前说话者保持明亮，另一侧保留可见但略压暗，避免头像被压成一团灰色。</summary>
     private void ApplySpeakerEmphasis(bool rightSide)
     {
         Color active = Colors.White;
-        Color inactive = new(0.56f, 0.58f, 0.62f, 1.0f);
+        Color inactive = new(0.72f, 0.74f, 0.78f, 1.0f);
 
         if (_leftPortrait is not null)
         {
