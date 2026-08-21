@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 ; Main scene for the playable tactical-RPG prototype.
 ; Gameplay remains on MainGame.cs while presentation/interaction helpers are
@@ -14,6 +14,7 @@
 [ext_resource type="Script" path="res://scripts/main/RightCommandCoordinator.cs" id="9_right_commands"]
 [ext_resource type="Script" path="res://scripts/visual/BattlePresentationPolishCoordinator.cs" id="10_battle_polish"]
 [ext_resource type="Script" path="res://scripts/visual/BattleWeaponEffectCoordinator.cs" id="11_weapon_effects"]
+[ext_resource type="Script" path="res://scripts/main/SaveGameCoordinator.cs" id="12_save_game"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -41,6 +42,9 @@ script = ExtResource("6_hud")
 
 [node name="RightCommandCoordinator" type="Node" parent="."]
 script = ExtResource("9_right_commands")
+
+[node name="SaveGameCoordinator" type="Node" parent="."]
+script = ExtResource("12_save_game")
 
 [node name="BattlePresentationPolishCoordinator" type="Node" parent="."]
 script = ExtResource("10_battle_polish")
