@@ -4,24 +4,40 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 横向战斗演出底部的复古状态 HUD。
-/// 该控件只消费已经结算好的战斗结果，按动画顺序重放 HP 变化，并在战后播放 EXP 增长与升级反馈。
+/// 横向战斗画面的左右状态框。
+/// 视觉结构以当前确认的参考稿为标准：黑色身份区、粗白像素边框、阵营色数据区以及 HP/HIT/ATC/DEF 分段条。
+/// 本控件只重放已经结算好的 HP，并读取单位当前属性用于表现，不参与任何真实战斗判定。
 /// </summary>
 public partial class RetroBattleStatusHudControl : Control
 {
-    /// <summary>左侧固定战斗单位。</summary>
+    /// <summary>单侧状态框宽度。</summary>
+    private const float PanelWidth = 560.0f;
+
+    /// <summary>左右状态框之间的固定间隔。</summary>
+    private const float PanelGap = 60.0f;
+
+    /// <summary>单侧状态框总高度。</summary>
+    private const float PanelHeight = 286.0f;
+
+    /// <summary>身份区高度。</summary>
+    private const float IdentityHeight = 112.0f;
+
+    /// <summary>外框像素厚度。</summary>
+    private const float BorderThickness = 4.0f;
+
+    /// <summary>数据条统一使用的分段数量。</summary>
+    private const int MeterSegments = 24;
+
+    /// <summary>左侧固定单位。</summary>
     private UnitModel? _leftUnit;
 
-    /// <summary>右侧固定战斗单位。</summary>
+    /// <summary>右侧固定单位。</summary>
     private UnitModel? _rightUnit;
 
-    /// <summary>本场实际获得经验的玩家单位；没有实际攻击时为空。</summary>
-    private UnitModel? _experienceUnit;
-
-    /// <summary>左侧当前演出 HP。</summary>
+    /// <summary>左侧演出中的当前 HP。</summary>
     private int _leftHp;
 
-    /// <summary>右侧当前演出 HP。</summary>
+    /// <summary>右侧演出中的当前 HP。</summary>
     private int _rightHp;
 
     /// <summary>左侧开战时最大 HP。</summary>
@@ -30,74 +46,46 @@ public partial class RetroBattleStatusHudControl : Control
     /// <summary>右侧开战时最大 HP。</summary>
     private int _rightMaxHp = 1;
 
-    /// <summary>玩家获得经验前的等级。</summary>
+    /// <summary>本场实际获得经验的玩家单位。</summary>
+    private UnitModel? _experienceUnit;
+
+    /// <summary>玩家获得经验前等级。</summary>
     private int _experienceLevelBefore = 1;
 
-    /// <summary>玩家获得经验前的 EXP。</summary>
+    /// <summary>玩家获得经验前 EXP。</summary>
     private int _experienceBefore;
 
-    /// <summary>本场实际获得的经验值。</summary>
-    private int _experienceGained;
+    /// <summary>左侧姓名。</summary>
+    private Label? _leftNameLabel;
 
-    /// <summary>当前是否已经进入战后经验展示阶段。</summary>
-    private bool _showExperienceResult;
+    /// <summary>左侧职业。</summary>
+    private Label? _leftClassLabel;
 
-    /// <summary>EXP 条是否正在从旧值滚动到新值。</summary>
-    private bool _experienceAnimating;
+    /// <summary>左侧等级。</summary>
+    private Label? _leftLevelLabel;
 
-    /// <summary>EXP 动画已经播放的秒数。</summary>
-    private float _experienceAnimationElapsed;
+    /// <summary>右侧姓名。</summary>
+    private Label? _rightNameLabel;
 
-    /// <summary>EXP 动画总时长。</summary>
-    private float _experienceAnimationDuration = 0.8f;
+    /// <summary>右侧职业。</summary>
+    private Label? _rightClassLabel;
 
-    /// <summary>
-    /// 把“等级 + EXP”转换成连续总经验后的动画起点。
-    /// 使用 (等级 - 1) × 100，确保 Lv.1 EXP 0 对应总值 0。
-    /// </summary>
-    private int _experienceAnimationStartTotal;
+    /// <summary>右侧等级。</summary>
+    private Label? _rightLevelLabel;
 
-    /// <summary>连续总经验动画终点。</summary>
-    private int _experienceAnimationEndTotal;
-
-    /// <summary>当前动画正在展示的连续总经验值。</summary>
-    private int _animatedExperienceTotal;
-
-    /// <summary>左侧姓名与武器文本。</summary>
-    private Label? _leftIdentityLabel;
-
-    /// <summary>右侧姓名与武器文本。</summary>
-    private Label? _rightIdentityLabel;
-
-    /// <summary>左侧 HP 数字。</summary>
-    private Label? _leftHpLabel;
-
-    /// <summary>右侧 HP 数字。</summary>
-    private Label? _rightHpLabel;
-
-    /// <summary>中央本击伤害/结果文字。</summary>
-    private Label? _damageLabel;
-
-    /// <summary>中央经验值与升级文字。</summary>
-    private Label? _experienceLabel;
-
-    /// <summary>
-    /// 创建固定文字控件并使用最近邻画面策略。
-    /// HUD 全部使用整数坐标矩形，不绘制圆角或抗锯齿装饰。
-    /// </summary>
+    /// <summary>创建文字层并强制使用最近邻纹理过滤。</summary>
     public override void _Ready()
     {
         ProcessMode = ProcessModeEnum.Always;
         MouseFilter = MouseFilterEnum.Ignore;
         TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
-        CreateLabels();
-        SetProcess(false);
+        CreateIdentityLabels();
         QueueRedraw();
     }
 
     /// <summary>
-    /// 开始一场新的战斗 HUD。
-    /// HP 必须传入 CombatResolver 保存的开战快照，不能直接读取已经被整场结算修改后的 CurrentHp。
+    /// 开始一场战斗状态展示。
+    /// HP 使用结算前快照，避免真实结算已经完成后直接跳到最终血量。
     /// </summary>
     public void BeginBattle(
         UnitModel leftUnit,
@@ -119,37 +107,14 @@ public partial class RetroBattleStatusHudControl : Control
         _experienceUnit = experienceUnit;
         _experienceLevelBefore = Math.Max(1, experienceLevelBefore);
         _experienceBefore = Math.Clamp(experienceBefore, 0, 99);
-        _experienceGained = 0;
-        _showExperienceResult = false;
-        _experienceAnimating = false;
-        _experienceAnimationElapsed = 0.0f;
-        _experienceAnimationStartTotal = ToTotalExperience(_experienceLevelBefore, _experienceBefore);
-        _experienceAnimationEndTotal = _experienceAnimationStartTotal;
-        _animatedExperienceTotal = _experienceAnimationStartTotal;
-        SetProcess(false);
 
-        if (_leftIdentityLabel is not null)
-        {
-            _leftIdentityLabel.Text = $"{leftUnit.DisplayName}  Lv.{leftUnit.Level}\n{leftUnit.EquippedWeapon.DisplayName}";
-        }
-
-        if (_rightIdentityLabel is not null)
-        {
-            _rightIdentityLabel.Text = $"{rightUnit.DisplayName}  Lv.{rightUnit.Level}\n{rightUnit.EquippedWeapon.DisplayName}";
-        }
-
-        if (_damageLabel is not null)
-        {
-            _damageLabel.Text = "READY";
-        }
-
-        RefreshLabels();
+        RefreshIdentityLabels();
         QueueRedraw();
     }
 
     /// <summary>
-    /// 按一击真实结果推进 HUD 数值。
-    /// 法术 HP 成本先从攻击方扣除；命中后再从防守方扣除伤害，顺序与实际结算一致。
+    /// 按逐击结果推进双方 HP。
+    /// 法术 HP 成本先扣攻击者，命中后再扣防守者伤害，顺序和真实结算保持一致。
     /// </summary>
     public void ApplyStrike(CombatStrikeResult strike)
     {
@@ -179,211 +144,181 @@ public partial class RetroBattleStatusHudControl : Control
             }
         }
 
-        if (_damageLabel is not null)
-        {
-            if (!strike.Hit)
-            {
-                _damageLabel.Text = "MISS";
-            }
-            else if (strike.Critical)
-            {
-                _damageLabel.Text = $"CRITICAL  {strike.Damage}";
-            }
-            else
-            {
-                _damageLabel.Text = $"DAMAGE  {strike.Damage}";
-            }
-        }
-
-        RefreshLabels();
         QueueRedraw();
     }
 
     /// <summary>
-    /// 战斗所有攻击结束后启动 EXP 增长动画。
-    /// MainGame 会在 ResolveExchange 返回以后发放经验，因此这里读取到的是已经真实结算后的最终等级与 EXP。
+    /// 返回本场真实获得的经验值。
+    /// 参考稿战斗框不再额外塞入 EXP 小面板，EXP/升级结果由中央信息框展示。
     /// </summary>
     public int ShowExperienceResult()
     {
-        _showExperienceResult = true;
-        _experienceGained = CalculateExperienceGain();
-
         if (_experienceUnit is null)
         {
-            _experienceAnimating = false;
-            SetProcess(false);
-            SetExperienceLabel("EXP  --");
-            QueueRedraw();
             return 0;
         }
 
-        _experienceAnimationStartTotal = ToTotalExperience(_experienceLevelBefore, _experienceBefore);
-        _experienceAnimationEndTotal = _experienceAnimationStartTotal + _experienceGained;
-        _animatedExperienceTotal = _experienceAnimationStartTotal;
-        _experienceAnimationElapsed = 0.0f;
-
-        // 小额经验也至少播放半秒；高经验最多约一秒，保证不拖慢战斗节奏。
-        _experienceAnimationDuration = Math.Clamp(
-            0.58f + _experienceGained * 0.006f,
-            0.58f,
-            1.02f);
-        _experienceAnimating = _experienceGained > 0;
-        SetProcess(_experienceAnimating);
-
-        if (!_experienceAnimating)
-        {
-            _animatedExperienceTotal = _experienceAnimationEndTotal;
-            RefreshExperienceLabel(true);
-        }
-        else
-        {
-            RefreshExperienceLabel(false);
-        }
-
-        QueueRedraw();
-        return _experienceGained;
+        int levelDifference = Math.Max(0, _experienceUnit.Level - _experienceLevelBefore);
+        int gained = levelDifference * 100 + _experienceUnit.Experience - _experienceBefore;
+        return Math.Max(0, gained);
     }
 
-    /// <summary>
-    /// EXP 动画按连续总经验推进。
-    /// 跨过 100 时条会自然从满格回到 0，并同步把显示等级提升一级。
-    /// </summary>
-    public override void _Process(double delta)
-    {
-        if (!_experienceAnimating)
-        {
-            return;
-        }
-
-        _experienceAnimationElapsed += Math.Max(0.0f, (float)delta);
-        float t = Mathf.Clamp(
-            _experienceAnimationElapsed / Math.Max(0.01f, _experienceAnimationDuration),
-            0.0f,
-            1.0f);
-
-        // 使用轻微 ease-out，让 EXP 前段增长更有反馈，末尾停得更稳。
-        float eased = 1.0f - (1.0f - t) * (1.0f - t);
-        _animatedExperienceTotal = (int)MathF.Round(Mathf.Lerp(
-            _experienceAnimationStartTotal,
-            _experienceAnimationEndTotal,
-            eased));
-
-        if (t >= 1.0f)
-        {
-            _animatedExperienceTotal = _experienceAnimationEndTotal;
-            _experienceAnimating = false;
-            SetProcess(false);
-            RefreshExperienceLabel(true);
-        }
-        else
-        {
-            RefreshExperienceLabel(false);
-        }
-
-        QueueRedraw();
-    }
-
-    /// <summary>清空中央结果信息，供下一场战斗重新使用。</summary>
+    /// <summary>清空当前战斗引用与显示。</summary>
     public void ResetBattle()
     {
         _leftUnit = null;
         _rightUnit = null;
         _experienceUnit = null;
-        _showExperienceResult = false;
-        _experienceAnimating = false;
-        _experienceGained = 0;
         _leftHp = 0;
         _rightHp = 0;
-        SetProcess(false);
-
-        if (_damageLabel is not null)
-        {
-            _damageLabel.Text = string.Empty;
-        }
-
-        if (_experienceLabel is not null)
-        {
-            _experienceLabel.Text = string.Empty;
-        }
-
-        RefreshLabels();
+        _leftMaxHp = 1;
+        _rightMaxHp = 1;
+        RefreshIdentityLabels();
         QueueRedraw();
     }
 
-    /// <summary>
-    /// 绘制双方深色状态框、青铜边线、HP 条以及中央 EXP 条。
-    /// 所有尺寸使用整数，保持复古界面边缘干净。
-    /// </summary>
+    /// <summary>绘制左右两个参考稿式状态框。</summary>
     public override void _Draw()
     {
-        Color panel = new(0.055f, 0.065f, 0.085f, 0.97f);
-        Color border = new(0.62f, 0.49f, 0.28f, 1.0f);
-        Color barBack = new(0.08f, 0.075f, 0.075f, 1.0f);
-        Color hpLeft = HpColor(_leftHp, _leftMaxHp);
-        Color hpRight = HpColor(_rightHp, _rightMaxHp);
+        DrawSidePanel(new Vector2(0, 0), _leftUnit, _leftHp, _leftMaxHp, _rightUnit);
+        DrawSidePanel(new Vector2(PanelWidth + PanelGap, 0), _rightUnit, _rightHp, _rightMaxHp, _leftUnit);
+    }
 
-        Rect2 leftPanel = new(new Vector2(0, 0), new Vector2(400, 116));
-        Rect2 centerPanel = new(new Vector2(410, 0), new Vector2(210, 116));
-        Rect2 rightPanel = new(new Vector2(630, 0), new Vector2(400, 116));
+    /// <summary>绘制单侧状态框、阵营色数据区和四条分段计量条。</summary>
+    private void DrawSidePanel(
+        Vector2 origin,
+        UnitModel? unit,
+        int hp,
+        int maxHp,
+        UnitModel? opponent)
+    {
+        UnitTeam team = unit?.Team ?? UnitTeam.Player;
+        Color primary = TeamVisualPalette.Primary(team);
+        Color highlight = TeamVisualPalette.Highlight(team);
+        Color dataBackground = primary.Darkened(0.08f);
+        Color emptySegment = primary.Darkened(0.46f);
+        Color white = new("f3f3ef");
+        Color black = new("050608");
 
-        DrawRect(leftPanel, panel, true);
-        DrawRect(centerPanel, panel, true);
-        DrawRect(rightPanel, panel, true);
-        DrawRect(leftPanel, border, false, 3.0f);
-        DrawRect(centerPanel, border, false, 3.0f);
-        DrawRect(rightPanel, border, false, 3.0f);
+        Rect2 fullPanel = new(origin, new Vector2(PanelWidth, PanelHeight));
+        Rect2 identityPanel = new(origin, new Vector2(PanelWidth, IdentityHeight));
+        Rect2 dataPanel = new(
+            origin + new Vector2(0, IdentityHeight),
+            new Vector2(PanelWidth, PanelHeight - IdentityHeight));
 
-        DrawHpBar(new Rect2(new Vector2(18, 76), new Vector2(364, 14)), _leftHp, _leftMaxHp, barBack, hpLeft);
-        DrawHpBar(new Rect2(new Vector2(648, 76), new Vector2(364, 14)), _rightHp, _rightMaxHp, barBack, hpRight);
+        // 参考稿使用纯黑身份区和高对比白色硬边框，不再使用青铜/灰蓝框架。
+        DrawRect(fullPanel, black, true);
+        DrawRect(dataPanel, dataBackground, true);
+        DrawRect(fullPanel, white, false, BorderThickness);
+        DrawLine(
+            origin + new Vector2(0, IdentityHeight),
+            origin + new Vector2(PanelWidth, IdentityHeight),
+            white,
+            BorderThickness,
+            false);
 
-        if (_experienceUnit is not null)
+        // 数据区顶部与底部各加一条更深阵营色，形成参考稿那种双层像素框感。
+        DrawRect(
+            new Rect2(dataPanel.Position + new Vector2(7, 7), new Vector2(dataPanel.Size.X - 14, 3)),
+            highlight,
+            true);
+        DrawRect(
+            new Rect2(dataPanel.Position + new Vector2(7, dataPanel.Size.Y - 10), new Vector2(dataPanel.Size.X - 14, 3)),
+            primary.Darkened(0.36f),
+            true);
+
+        int hit = unit is null || opponent is null
+            ? 0
+            : CombatRules.CalculateHitRate(unit, opponent, 0);
+        int attack = unit is null
+            ? 0
+            : (unit.EquippedWeapon.DamageType == DamageType.Magical ? unit.Magic : unit.Strength) + unit.EquippedWeapon.Might;
+        int defense = unit?.Defense ?? 0;
+
+        DrawMetricRow(origin, "HP", 128, hp, Math.Max(1, maxHp), white, emptySegment, true);
+        DrawMetricRow(origin, "HIT", 169, hit, 100, white, emptySegment, false);
+        DrawMetricRow(origin, "ATC", 210, attack, 40, white, emptySegment, false);
+        DrawMetricRow(origin, "DEF", 251, defense, 30, white, emptySegment, false);
+    }
+
+    /// <summary>绘制一行标签与固定 24 格像素计量条。</summary>
+    private void DrawMetricRow(
+        Vector2 origin,
+        string label,
+        float y,
+        int value,
+        int maxValue,
+        Color filled,
+        Color empty,
+        bool hpRow)
+    {
+        // 文字由 DrawString 绘制会依赖系统字体抗锯齿，因此标签仍交给独立 Label 风格；这里仅绘制条本体。
+        // 行首留出 90px 给 HP/HIT/ATC/DEF 标签，条本体全部锁到整数坐标。
+        Rect2 meterRect = new(
+            origin + new Vector2(108, y),
+            new Vector2(414, hpRow ? 20 : 18));
+        DrawSegmentMeter(meterRect, value, maxValue, filled, empty);
+    }
+
+    /// <summary>绘制固定数量的硬边分段条，任何缩放下都保持独立方块而不是平滑渐变。</summary>
+    private void DrawSegmentMeter(Rect2 rect, int value, int maxValue, Color filled, Color empty)
+    {
+        float safeRatio = Mathf.Clamp((float)value / Math.Max(1, maxValue), 0.0f, 1.0f);
+        int filledSegments = (int)MathF.Round(safeRatio * MeterSegments);
+        float segmentGap = 2.0f;
+        float segmentWidth = MathF.Floor((rect.Size.X - segmentGap * (MeterSegments - 1)) / MeterSegments);
+        float usedWidth = segmentWidth * MeterSegments + segmentGap * (MeterSegments - 1);
+        float startX = rect.Position.X + MathF.Floor((rect.Size.X - usedWidth) * 0.5f);
+
+        for (int index = 0; index < MeterSegments; index++)
         {
-            int expValue = CurrentDisplayedExperience();
-            DrawExperienceBar(
-                new Rect2(new Vector2(425, 88), new Vector2(180, 10)),
-                expValue,
-                barBack,
-                new Color(0.86f, 0.72f, 0.27f, 1.0f));
-
-            // EXP 每 10 点增加一个小刻度，强化老式战棋 HUD 的离散读数感。
-            for (int mark = 1; mark < 10; mark++)
-            {
-                float x = 425 + mark * 18;
-                DrawLine(
-                    new Vector2(x, 88),
-                    new Vector2(x, 98),
-                    new Color(0.15f, 0.13f, 0.10f, 0.72f),
-                    1.0f);
-            }
+            Rect2 segment = new(
+                new Vector2(startX + index * (segmentWidth + segmentGap), rect.Position.Y),
+                new Vector2(segmentWidth, rect.Size.Y));
+            Color color = index < filledSegments ? filled : empty;
+            DrawRect(segment, color, true);
+            DrawRect(segment, new Color("101116"), false, 1.0f);
         }
     }
 
-    /// <summary>创建 HUD 内部所有文本标签。</summary>
-    private void CreateLabels()
+    /// <summary>创建身份区和数据区所需的全部文字标签。</summary>
+    private void CreateIdentityLabels()
     {
-        _leftIdentityLabel = CreateLabel(new Vector2(16, 8), new Vector2(368, 54), HorizontalAlignment.Left, 18);
-        AddChild(_leftIdentityLabel);
+        _leftNameLabel = CreatePixelLabel(new Vector2(24, 16), new Vector2(350, 42), HorizontalAlignment.Left, 27);
+        _leftClassLabel = CreatePixelLabel(new Vector2(24, 57), new Vector2(320, 36), HorizontalAlignment.Left, 22);
+        _leftLevelLabel = CreatePixelLabel(new Vector2(398, 22), new Vector2(132, 36), HorizontalAlignment.Right, 23);
 
-        _rightIdentityLabel = CreateLabel(new Vector2(646, 8), new Vector2(368, 54), HorizontalAlignment.Right, 18);
-        AddChild(_rightIdentityLabel);
+        float rightX = PanelWidth + PanelGap;
+        _rightNameLabel = CreatePixelLabel(new Vector2(rightX + 24, 16), new Vector2(350, 42), HorizontalAlignment.Left, 27);
+        _rightClassLabel = CreatePixelLabel(new Vector2(rightX + 24, 57), new Vector2(320, 36), HorizontalAlignment.Left, 22);
+        _rightLevelLabel = CreatePixelLabel(new Vector2(rightX + 398, 22), new Vector2(132, 36), HorizontalAlignment.Right, 23);
 
-        _leftHpLabel = CreateLabel(new Vector2(18, 90), new Vector2(364, 22), HorizontalAlignment.Left, 16);
-        AddChild(_leftHpLabel);
+        foreach (Label label in new[]
+                 {
+                     _leftNameLabel,
+                     _leftClassLabel,
+                     _leftLevelLabel,
+                     _rightNameLabel,
+                     _rightClassLabel,
+                     _rightLevelLabel
+                 })
+        {
+            AddChild(label);
+        }
 
-        _rightHpLabel = CreateLabel(new Vector2(648, 90), new Vector2(364, 22), HorizontalAlignment.Right, 16);
-        AddChild(_rightHpLabel);
-
-        _damageLabel = CreateLabel(new Vector2(420, 14), new Vector2(190, 40), HorizontalAlignment.Center, 20);
-        _damageLabel.VerticalAlignment = VerticalAlignment.Center;
-        AddChild(_damageLabel);
-
-        _experienceLabel = CreateLabel(new Vector2(416, 54), new Vector2(198, 32), HorizontalAlignment.Center, 14);
-        _experienceLabel.VerticalAlignment = VerticalAlignment.Center;
-        AddChild(_experienceLabel);
+        // 数据区标签单独创建，位置与分段条严格对应。
+        AddChild(CreateMetricLabel(new Vector2(24, 122), "HP"));
+        AddChild(CreateMetricLabel(new Vector2(24, 163), "HIT"));
+        AddChild(CreateMetricLabel(new Vector2(24, 204), "ATC"));
+        AddChild(CreateMetricLabel(new Vector2(24, 245), "DEF"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 122), "HP"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 163), "HIT"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 204), "ATC"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 245), "DEF"));
     }
 
-    /// <summary>创建统一颜色和字号的战斗 HUD 标签。</summary>
-    private static Label CreateLabel(
+    /// <summary>创建身份文字，使用粗白字和黑色像素阴影提高黑底可读性。</summary>
+    private static Label CreatePixelLabel(
         Vector2 position,
         Vector2 size,
         HorizontalAlignment alignment,
@@ -394,149 +329,56 @@ public partial class RetroBattleStatusHudControl : Control
             Position = position,
             Size = size,
             HorizontalAlignment = alignment,
+            VerticalAlignment = VerticalAlignment.Center,
             MouseFilter = MouseFilterEnum.Ignore
         };
-        label.AddThemeColorOverride("font_color", new Color(0.94f, 0.91f, 0.82f));
-        label.AddThemeColorOverride("font_shadow_color", new Color(0.02f, 0.02f, 0.025f, 0.86f));
-        label.AddThemeConstantOverride("shadow_offset_x", 1);
-        label.AddThemeConstantOverride("shadow_offset_y", 1);
+        label.AddThemeColorOverride("font_color", new Color("f3f3ef"));
+        label.AddThemeColorOverride("font_shadow_color", Colors.Black);
+        label.AddThemeConstantOverride("shadow_offset_x", 2);
+        label.AddThemeConstantOverride("shadow_offset_y", 2);
         label.AddThemeFontSizeOverride("font_size", fontSize);
         return label;
     }
 
-    /// <summary>刷新双方 HP 数字和默认经验信息。</summary>
-    private void RefreshLabels()
+    /// <summary>创建 HP/HIT/ATC/DEF 行首标签。</summary>
+    private static Label CreateMetricLabel(Vector2 position, string text)
     {
-        if (_leftHpLabel is not null)
-        {
-            _leftHpLabel.Text = _leftUnit is null ? string.Empty : $"HP {_leftHp}/{_leftMaxHp}";
-        }
-
-        if (_rightHpLabel is not null)
-        {
-            _rightHpLabel.Text = _rightUnit is null ? string.Empty : $"HP {_rightHp}/{_rightMaxHp}";
-        }
-
-        if (_experienceLabel is not null && !_showExperienceResult)
-        {
-            _experienceLabel.Text = _experienceUnit is null
-                ? "EXP  --"
-                : $"EXP {_experienceBefore}/100";
-        }
+        Label label = CreatePixelLabel(position, new Vector2(78, 28), HorizontalAlignment.Left, 22);
+        label.Text = text;
+        return label;
     }
 
-    /// <summary>刷新 EXP 动画阶段的文字，包括跨级时的 LEVEL UP 提示。</summary>
-    private void RefreshExperienceLabel(bool finalFrame)
+    /// <summary>把当前双方中文姓名、职业和等级写入身份区。</summary>
+    private void RefreshIdentityLabels()
     {
-        if (_experienceLabel is null || _experienceUnit is null)
+        if (_leftNameLabel is not null)
         {
-            return;
+            _leftNameLabel.Text = _leftUnit?.DisplayName ?? string.Empty;
         }
 
-        int displayedLevel = CurrentDisplayedLevel();
-        int displayedExperience = CurrentDisplayedExperience();
-        bool hasLeveled = displayedLevel > _experienceLevelBefore;
-
-        if (hasLeveled)
+        if (_leftClassLabel is not null)
         {
-            _experienceLabel.Text = finalFrame
-                ? $"LEVEL UP  Lv.{_experienceUnit.Level}  +{_experienceGained}"
-                : $"LEVEL UP  Lv.{displayedLevel}  {displayedExperience}/100";
-            _experienceLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.86f, 0.38f));
-        }
-        else
-        {
-            _experienceLabel.Text = finalFrame
-                ? $"EXP +{_experienceGained}   {_experienceUnit.Experience}/100"
-                : $"EXP +{_experienceGained}   {displayedExperience}/100";
-            _experienceLabel.AddThemeColorOverride("font_color", new Color(0.94f, 0.91f, 0.82f));
-        }
-    }
-
-    /// <summary>直接设置 EXP 文本并恢复普通颜色。</summary>
-    private void SetExperienceLabel(string text)
-    {
-        if (_experienceLabel is null)
-        {
-            return;
+            _leftClassLabel.Text = _leftUnit?.ClassDefinition.DisplayName ?? string.Empty;
         }
 
-        _experienceLabel.Text = text;
-        _experienceLabel.AddThemeColorOverride("font_color", new Color(0.94f, 0.91f, 0.82f));
-    }
-
-    /// <summary>绘制一条按当前生命比例缩放的硬边 HP 条。</summary>
-    private void DrawHpBar(Rect2 rect, int hp, int maxHp, Color background, Color foreground)
-    {
-        DrawRect(rect, background, true);
-        float ratio = Mathf.Clamp((float)hp / Math.Max(1, maxHp), 0.0f, 1.0f);
-        int fillWidth = (int)MathF.Round(rect.Size.X * ratio);
-        if (fillWidth > 0)
+        if (_leftLevelLabel is not null)
         {
-            DrawRect(new Rect2(rect.Position, new Vector2(fillWidth, rect.Size.Y)), foreground, true);
-        }
-    }
-
-    /// <summary>绘制 0~99 的玩家经验条。</summary>
-    private void DrawExperienceBar(Rect2 rect, int experience, Color background, Color foreground)
-    {
-        DrawRect(rect, background, true);
-        float ratio = Mathf.Clamp(Math.Clamp(experience, 0, 99) / 100.0f, 0.0f, 1.0f);
-        int fillWidth = (int)MathF.Round(rect.Size.X * ratio);
-        if (fillWidth > 0)
-        {
-            DrawRect(new Rect2(rect.Position, new Vector2(fillWidth, rect.Size.Y)), foreground, true);
-        }
-    }
-
-    /// <summary>根据剩余生命比例选择绿、黄、红三段 HP 颜色。</summary>
-    private static Color HpColor(int hp, int maxHp)
-    {
-        float ratio = Mathf.Clamp((float)hp / Math.Max(1, maxHp), 0.0f, 1.0f);
-        if (ratio <= 0.25f)
-        {
-            return new Color(0.78f, 0.20f, 0.18f, 1.0f);
+            _leftLevelLabel.Text = _leftUnit is null ? string.Empty : $"LV{_leftUnit.Level}";
         }
 
-        if (ratio <= 0.50f)
+        if (_rightNameLabel is not null)
         {
-            return new Color(0.86f, 0.70f, 0.20f, 1.0f);
+            _rightNameLabel.Text = _rightUnit?.DisplayName ?? string.Empty;
         }
 
-        return new Color(0.28f, 0.72f, 0.32f, 1.0f);
-    }
-
-    /// <summary>把等级和当前 EXP 转换成可以连续动画的总经验值。</summary>
-    private static int ToTotalExperience(int level, int experience)
-    {
-        return Math.Max(0, level - 1) * 100 + Math.Clamp(experience, 0, 99);
-    }
-
-    /// <summary>返回当前 EXP 动画应该显示的等级。</summary>
-    private int CurrentDisplayedLevel()
-    {
-        return Math.Max(1, _animatedExperienceTotal / 100 + 1);
-    }
-
-    /// <summary>返回当前 EXP 动画应该显示的 0~99 EXP。</summary>
-    private int CurrentDisplayedExperience()
-    {
-        return Math.Clamp(_animatedExperienceTotal % 100, 0, 99);
-    }
-
-    /// <summary>
-    /// 通过等级差与当前 EXP 计算本场实际获得经验。
-    /// 每级固定需要 100 EXP，因此跨级也能正确累计。
-    /// </summary>
-    private int CalculateExperienceGain()
-    {
-        if (_experienceUnit is null)
+        if (_rightClassLabel is not null)
         {
-            return 0;
+            _rightClassLabel.Text = _rightUnit?.ClassDefinition.DisplayName ?? string.Empty;
         }
 
-        int levelDifference = Math.Max(0, _experienceUnit.Level - _experienceLevelBefore);
-        int gained = levelDifference * 100 + _experienceUnit.Experience - _experienceBefore;
-        return Math.Max(0, gained);
+        if (_rightLevelLabel is not null)
+        {
+            _rightLevelLabel.Text = _rightUnit is null ? string.Empty : $"LV{_rightUnit.Level}";
+        }
     }
 }
