@@ -4,7 +4,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 独立战斗演出中的程序化像素风效果类型。
-/// 当前使用原创几何效果保证攻击反馈完整，之后可以逐项替换为正式特效序列帧。
+/// 这些效果只负责视觉反馈，不参与命中、伤害、经验或回合规则。
 /// </summary>
 public enum RetroBattleEffectKind
 {
@@ -12,12 +12,15 @@ public enum RetroBattleEffectKind
     Hit,
     Dodge,
     Critical,
-    Magic
+    Magic,
+    Arrow,
+    Slash,
+    Thrust
 }
 
 /// <summary>
-/// 绘制复古像素战斗舞台，以及命中、闪避、必杀与魔法的轻量战斗特效。
-/// 该控件完全属于表现层，不会修改单位生命值或战斗结果。
+/// 绘制命中、闪避、必杀、魔法以及不同武器的飞行/动作轨迹。
+/// 战场背景已经由 RetroBattleStageBackdropControl 独立负责，本控件不再重复绘制暗色背景。
 /// </summary>
 public partial class RetroBattleEffectControl : Control
 {
@@ -30,22 +33,13 @@ public partial class RetroBattleEffectControl : Control
     /// <summary>特效是否从左侧朝右侧释放。</summary>
     private bool _leftToRight = true;
 
-    /// <summary>
-    /// 初始化战斗舞台。
-    /// 把本控件移到 stage 的第一个子节点，使背景稳定绘制在人物和 HUD 后方，同时仍位于战斗面板内部。
-    /// </summary>
+    /// <summary>初始化纯特效层；不再改变子节点顺序或绘制背景。</summary>
     public override void _Ready()
     {
         MouseFilter = MouseFilterEnum.Ignore;
         TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
         Visible = true;
-
-        Node? parent = GetParent();
-        if (parent is not null && GetIndex() != 0)
-        {
-            parent.MoveChild(this, 0);
-        }
-
+        SetProcess(false);
         QueueRedraw();
     }
 
@@ -61,9 +55,27 @@ public partial class RetroBattleEffectControl : Control
     }
 
     /// <summary>
-    /// 清除当前攻击特效，但保留像素战场背景。
-    /// 旧实现会把整个控件隐藏，导致战斗间隙重新露出纯黑面板。
+    /// 按攻击者职业武器选择蓄势阶段效果。
+    /// 魔法优先使用能量飞行；物理武器分别使用箭矢、枪刺或剑斩轨迹。
     /// </summary>
+    public void PlayWeaponWindup(
+        CharacterWeaponSilhouette weapon,
+        bool magical,
+        bool leftToRight)
+    {
+        RetroBattleEffectKind kind = magical
+            ? RetroBattleEffectKind.Magic
+            : weapon switch
+            {
+                CharacterWeaponSilhouette.Bow => RetroBattleEffectKind.Arrow,
+                CharacterWeaponSilhouette.Spear => RetroBattleEffectKind.Thrust,
+                _ => RetroBattleEffectKind.Slash
+            };
+
+        Play(kind, leftToRight);
+    }
+
+    /// <summary>清除当前攻击特效；独立亮色战场背景不会受影响。</summary>
     public void Clear()
     {
         _kind = RetroBattleEffectKind.None;
@@ -86,14 +98,9 @@ public partial class RetroBattleEffectControl : Control
         QueueRedraw();
     }
 
-    /// <summary>
-    /// 先绘制原创复古战场，再根据效果类型叠加攻击反馈。
-    /// 背景使用水平色带、阶梯远山和块状地面，避免渐变与抗锯齿造成现代平滑感。
-    /// </summary>
+    /// <summary>只绘制当前攻击反馈，不再覆盖后方的亮色像素舞台。</summary>
     public override void _Draw()
     {
-        DrawBattleStage();
-
         switch (_kind)
         {
             case RetroBattleEffectKind.Hit:
@@ -108,158 +115,202 @@ public partial class RetroBattleEffectControl : Control
             case RetroBattleEffectKind.Magic:
                 DrawMagicEffect();
                 break;
+            case RetroBattleEffectKind.Arrow:
+                DrawArrowEffect();
+                break;
+            case RetroBattleEffectKind.Slash:
+                DrawSlashEffect();
+                break;
+            case RetroBattleEffectKind.Thrust:
+                DrawThrustEffect();
+                break;
         }
     }
 
-    /// <summary>
-    /// 绘制原创的古典战棋横向战斗舞台。
-    /// 视觉语言使用低饱和天空、远山、旧城墙、草地与石质前景，保持战争中的古典乡野氛围，但不复制任何原作背景。
-    /// </summary>
-    private void DrawBattleStage()
-    {
-        float width = Math.Max(1.0f, Size.X);
-        float height = Math.Max(1.0f, Size.Y);
-        int horizon = (int)MathF.Round(height * 0.58f);
-
-        // 天空使用离散水平色带，而不是连续渐变，放大后仍保持像素游戏的硬边层次。
-        DrawRect(new Rect2(0, 0, width, horizon * 0.34f), new Color(0.19f, 0.25f, 0.32f), true);
-        DrawRect(new Rect2(0, horizon * 0.34f, width, horizon * 0.34f), new Color(0.27f, 0.33f, 0.37f), true);
-        DrawRect(new Rect2(0, horizon * 0.68f, width, horizon * 0.32f), new Color(0.38f, 0.39f, 0.36f), true);
-
-        // 稀疏的块状云只使用矩形，避免圆形云朵带来平滑卡通感。
-        DrawPixelCloud(new Vector2(width * 0.12f, height * 0.14f), 1.0f);
-        DrawPixelCloud(new Vector2(width * 0.67f, height * 0.10f), 0.82f);
-
-        // 远山使用阶梯矩形建立层次，轮廓比人物更暗、更低对比，保证角色仍是视觉焦点。
-        DrawSteppedHill(width * 0.02f, horizon, width * 0.32f, height * 0.22f, new Color(0.18f, 0.24f, 0.23f));
-        DrawSteppedHill(width * 0.30f, horizon, width * 0.28f, height * 0.18f, new Color(0.22f, 0.27f, 0.24f));
-        DrawSteppedHill(width * 0.58f, horizon, width * 0.40f, height * 0.24f, new Color(0.17f, 0.22f, 0.21f));
-
-        // 右侧远景加入低矮旧城墙，让战斗场景更像一处真实战场，而不是空摄影棚。
-        Color wallDark = new(0.24f, 0.24f, 0.22f);
-        Color wallLight = new(0.31f, 0.30f, 0.27f);
-        float wallY = horizon - 54;
-        DrawRect(new Rect2(width * 0.72f, wallY, width * 0.23f, 54), wallDark, true);
-        for (int index = 0; index < 6; index++)
-        {
-            DrawRect(new Rect2(width * 0.72f + index * 42, wallY - 12, 25, 14), wallLight, true);
-        }
-        DrawRect(new Rect2(width * 0.80f, wallY + 15, 34, 39), new Color(0.12f, 0.13f, 0.13f), true);
-
-        // 中景草地使用两个色带和稀疏草簇，不把地面做成纯色矩形。
-        DrawRect(new Rect2(0, horizon, width, height - horizon), new Color(0.21f, 0.30f, 0.20f), true);
-        DrawRect(new Rect2(0, horizon + 48, width, height - horizon - 48), new Color(0.18f, 0.24f, 0.18f), true);
-        for (int index = 0; index < 18; index++)
-        {
-            float x = 18 + index * 63;
-            float y = horizon + 18 + (index % 3) * 17;
-            DrawRect(new Rect2(x, y, 4, 12), new Color(0.31f, 0.40f, 0.24f), true);
-            DrawRect(new Rect2(x + 5, y + 5, 4, 8), new Color(0.27f, 0.36f, 0.22f), true);
-        }
-
-        // 前景石质战斗平台提供稳定脚底基准，并用裂纹打破规则方块感。
-        float platformY = height - 62;
-        DrawRect(new Rect2(0, platformY, width, 62), new Color(0.27f, 0.25f, 0.22f), true);
-        DrawRect(new Rect2(0, platformY, width, 5), new Color(0.43f, 0.38f, 0.29f), true);
-        for (int index = 0; index < 14; index++)
-        {
-            float x = index * 82;
-            DrawLine(
-                new Vector2(x, platformY + 6),
-                new Vector2(x + 24, platformY + 28),
-                new Color(0.14f, 0.13f, 0.12f),
-                3.0f);
-            DrawLine(
-                new Vector2(x + 24, platformY + 28),
-                new Vector2(x + 16, platformY + 45),
-                new Color(0.14f, 0.13f, 0.12f),
-                2.0f);
-        }
-    }
-
-    /// <summary>绘制一组块状像素云。</summary>
-    private void DrawPixelCloud(Vector2 origin, float scale)
-    {
-        Color cloud = new(0.58f, 0.59f, 0.56f, 0.72f);
-        DrawRect(new Rect2(origin, new Vector2(78 * scale, 14 * scale)), cloud, true);
-        DrawRect(new Rect2(origin + new Vector2(18 * scale, -10 * scale), new Vector2(38 * scale, 12 * scale)), cloud, true);
-        DrawRect(new Rect2(origin + new Vector2(55 * scale, 5 * scale), new Vector2(42 * scale, 9 * scale)), cloud, true);
-    }
-
-    /// <summary>使用多级矩形而不是抗锯齿多边形绘制远山。</summary>
-    private void DrawSteppedHill(float x, float horizon, float width, float height, Color color)
-    {
-        const int steps = 6;
-        float stepWidth = width / steps;
-        for (int index = 0; index < steps; index++)
-        {
-            float normalized = index / (float)(steps - 1);
-            float peak = 1.0f - MathF.Abs(normalized * 2.0f - 1.0f);
-            float blockHeight = Math.Max(18.0f, height * (0.38f + peak * 0.62f));
-            DrawRect(
-                new Rect2(x + index * stepWidth, horizon - blockHeight, stepWidth + 2, blockHeight),
-                color,
-                true);
-        }
-    }
-
-    /// <summary>命中时绘制短促的交叉斩击线。</summary>
+    /// <summary>命中时在防守方位置绘制短促的硬边交叉冲击。</summary>
     private void DrawHitEffect()
     {
         float fade = Mathf.Clamp(1.0f - _elapsed / 0.32f, 0.0f, 1.0f);
-        Vector2 center = new(Size.X * 0.5f, Size.Y * 0.48f);
+        Vector2 center = DefenderCenter();
         Color bright = new(1.0f, 0.92f, 0.72f, fade);
-        DrawLine(center + new Vector2(-42, -36), center + new Vector2(42, 36), bright, 8.0f);
-        DrawLine(center + new Vector2(-34, 42), center + new Vector2(34, -42), bright, 5.0f);
+        Color shadow = new(0.66f, 0.36f, 0.18f, fade * 0.82f);
+
+        // 两层线条使用默认非抗锯齿绘制，保留块状冲击感。
+        DrawLine(center + new Vector2(-34, -30), center + new Vector2(34, 30), shadow, 10.0f);
+        DrawLine(center + new Vector2(-34, -30), center + new Vector2(34, 30), bright, 5.0f);
+        DrawLine(center + new Vector2(-27, 34), center + new Vector2(27, -34), bright, 4.0f);
+
+        // 四个方形火花代替平滑圆形粒子。
+        DrawRect(new Rect2(center + new Vector2(-50, -7), new Vector2(12, 6)), bright, true);
+        DrawRect(new Rect2(center + new Vector2(38, 5), new Vector2(14, 6)), bright, true);
+        DrawRect(new Rect2(center + new Vector2(-5, -48), new Vector2(6, 12)), bright, true);
+        DrawRect(new Rect2(center + new Vector2(7, 37), new Vector2(6, 14)), bright, true);
     }
 
-    /// <summary>闪避时绘制向后拖出的速度线。</summary>
+    /// <summary>闪避时在防守方位置绘制向后拖出的速度线。</summary>
     private void DrawDodgeEffect()
     {
         float fade = Mathf.Clamp(1.0f - _elapsed / 0.35f, 0.0f, 1.0f);
-        float direction = _leftToRight ? 1.0f : -1.0f;
+        float retreatDirection = _leftToRight ? 1.0f : -1.0f;
         Color streak = new(0.72f, 0.88f, 1.0f, fade);
-        Vector2 center = new(Size.X * 0.5f, Size.Y * 0.5f);
+        Vector2 center = DefenderCenter();
 
         for (int index = -2; index <= 2; index++)
         {
             float y = center.Y + index * 18.0f;
             DrawLine(
-                new Vector2(center.X - direction * 65.0f, y),
-                new Vector2(center.X + direction * 15.0f, y),
+                new Vector2(center.X - retreatDirection * 74.0f, y),
+                new Vector2(center.X + retreatDirection * 12.0f, y),
                 streak,
                 4.0f);
         }
     }
 
-    /// <summary>必杀时绘制一次全屏闪光和中央爆发线。</summary>
+    /// <summary>必杀时绘制一次浅色闪光和防守方位置的像素爆发线。</summary>
     private void DrawCriticalEffect()
     {
         float flash = Mathf.Clamp(1.0f - _elapsed / 0.42f, 0.0f, 1.0f);
-        DrawRect(new Rect2(Vector2.Zero, Size), new Color(1.0f, 0.93f, 0.72f, flash * 0.34f), true);
+        DrawRect(
+            new Rect2(Vector2.Zero, Size),
+            new Color(1.0f, 0.93f, 0.72f, flash * 0.22f),
+            true);
 
-        Vector2 center = new(Size.X * 0.5f, Size.Y * 0.46f);
+        Vector2 center = DefenderCenter();
         Color ray = new(1.0f, 0.78f, 0.28f, flash);
-        for (int index = 0; index < 8; index++)
+
+        // 八个方向使用水平、垂直和阶梯斜线，不使用平滑圆形爆发。
+        DrawLine(center + new Vector2(20, 0), center + new Vector2(112, 0), ray, 6.0f);
+        DrawLine(center + new Vector2(-20, 0), center + new Vector2(-112, 0), ray, 6.0f);
+        DrawLine(center + new Vector2(0, 20), center + new Vector2(0, 100), ray, 6.0f);
+        DrawLine(center + new Vector2(0, -20), center + new Vector2(0, -100), ray, 6.0f);
+        DrawLine(center + new Vector2(15, 15), center + new Vector2(76, 76), ray, 5.0f);
+        DrawLine(center + new Vector2(-15, 15), center + new Vector2(-76, 76), ray, 5.0f);
+        DrawLine(center + new Vector2(15, -15), center + new Vector2(76, -76), ray, 5.0f);
+        DrawLine(center + new Vector2(-15, -15), center + new Vector2(-76, -76), ray, 5.0f);
+    }
+
+    /// <summary>
+    /// 弓箭在蓄势时间内真正从攻击方飞向防守方。
+    /// 箭杆、箭头和尾羽全部使用整数矩形，移动坐标也锁到整屏幕像素。
+    /// </summary>
+    private void DrawArrowEffect()
+    {
+        float t = Mathf.Clamp(_elapsed / 0.34f, 0.0f, 1.0f);
+        float direction = _leftToRight ? 1.0f : -1.0f;
+        Vector2 from = AttackerLaunchPoint();
+        Vector2 to = DefenderCenter() + new Vector2(-direction * 26.0f, -6.0f);
+
+        // 轻微抛物线只改变纵坐标，但最后仍取整，避免亚像素模糊。
+        float arc = -Mathf.Sin(t * Mathf.Pi) * 18.0f;
+        Vector2 center = SnapScreenPixel(from.Lerp(to, t) + new Vector2(0, arc));
+        Color shaft = new(0.48f, 0.31f, 0.18f, 1.0f);
+        Color metal = new(0.88f, 0.87f, 0.78f, 1.0f);
+        Color feather = new(0.78f, 0.65f, 0.42f, 1.0f);
+
+        float shaftX = direction > 0 ? center.X - 22 : center.X - 22;
+        DrawRect(new Rect2(shaftX, center.Y - 2, 44, 4), shaft, true);
+
+        float tipX = direction > 0 ? center.X + 20 : center.X - 28;
+        DrawRect(new Rect2(tipX, center.Y - 5, 8, 10), metal, true);
+        DrawRect(new Rect2(direction > 0 ? center.X - 27 : center.X + 19, center.Y - 7, 8, 4), feather, true);
+        DrawRect(new Rect2(direction > 0 ? center.X - 27 : center.X + 19, center.Y + 3, 8, 4), feather, true);
+
+        // 快速移动时在箭尾留两段短轨迹，加强“已经离弓”的可读性。
+        Color trail = new(0.90f, 0.84f, 0.64f, 0.48f);
+        DrawRect(new Rect2(center.X - direction * 46 - 8, center.Y - 2, 14, 3), trail, true);
+        DrawRect(new Rect2(center.X - direction * 68 - 6, center.Y - 1, 10, 2), trail, true);
+    }
+
+    /// <summary>剑士攻击时绘制从身体前方扫出的三段硬边斩击轨迹。</summary>
+    private void DrawSlashEffect()
+    {
+        float t = Mathf.Clamp(_elapsed / 0.34f, 0.0f, 1.0f);
+        float direction = _leftToRight ? 1.0f : -1.0f;
+        Vector2 start = AttackerLaunchPoint() + new Vector2(direction * 12, -42);
+        Vector2 center = SnapScreenPixel(start + new Vector2(direction * t * 118.0f, t * 74.0f));
+        float fade = Mathf.Clamp(1.0f - MathF.Abs(t - 0.55f) * 1.35f, 0.22f, 1.0f);
+        Color outer = new(0.45f, 0.34f, 0.20f, fade * 0.72f);
+        Color blade = new(0.96f, 0.91f, 0.74f, fade);
+
+        // 三条平行硬边轨迹形成“刃面”，比单根细线更接近像素剑光。
+        DrawLine(center + new Vector2(-direction * 54, -42), center + new Vector2(direction * 42, 44), outer, 11.0f);
+        DrawLine(center + new Vector2(-direction * 52, -40), center + new Vector2(direction * 40, 42), blade, 5.0f);
+        DrawLine(center + new Vector2(-direction * 34, -50), center + new Vector2(direction * 50, 28), blade, 3.0f);
+    }
+
+    /// <summary>枪兵攻击时显示从枪尖向前延伸的直线压迫感和短促空气轨迹。</summary>
+    private void DrawThrustEffect()
+    {
+        float t = Mathf.Clamp(_elapsed / 0.34f, 0.0f, 1.0f);
+        float direction = _leftToRight ? 1.0f : -1.0f;
+        Vector2 start = AttackerLaunchPoint() + new Vector2(direction * 12, 10);
+        float length = 34.0f + t * 150.0f;
+        Color dark = new(0.37f, 0.29f, 0.20f, 0.64f);
+        Color light = new(0.92f, 0.88f, 0.72f, 0.88f);
+
+        Vector2 end = SnapScreenPixel(start + new Vector2(direction * length, 0));
+        DrawLine(start, end, dark, 9.0f);
+        DrawLine(start, end, light, 3.0f);
+
+        // 枪尖前方的三条短线在最大突刺阶段展开，强调直线速度而不是剑的弧形轨迹。
+        if (t > 0.42f)
         {
-            float angle = Mathf.Tau * index / 8.0f;
-            Vector2 direction = Vector2.Right.Rotated(angle);
-            DrawLine(center + direction * 20.0f, center + direction * 105.0f, ray, 6.0f);
+            DrawLine(end + new Vector2(-direction * 28, -13), end + new Vector2(direction * 18, -13), light, 3.0f);
+            DrawLine(end + new Vector2(-direction * 34, 0), end + new Vector2(direction * 24, 0), light, 4.0f);
+            DrawLine(end + new Vector2(-direction * 28, 13), end + new Vector2(direction * 18, 13), light, 3.0f);
         }
     }
 
-    /// <summary>魔法时绘制从施法方朝目标方飞行的能量核心与环形波纹。</summary>
+    /// <summary>
+    /// 魔法从施法方聚成方形能量核后飞向防守方，沿途留下离散像素尾迹。
+    /// 不使用圆形/圆弧，避免在复古像素人物旁边出现过于平滑的现代特效。
+    /// </summary>
     private void DrawMagicEffect()
     {
-        float t = Mathf.Clamp(_elapsed / 0.48f, 0.0f, 1.0f);
-        float fromX = _leftToRight ? Size.X * 0.35f : Size.X * 0.65f;
-        float toX = _leftToRight ? Size.X * 0.65f : Size.X * 0.35f;
-        Vector2 center = new(Mathf.Lerp(fromX, toX, t), Size.Y * 0.45f);
-        float pulse = 12.0f + Mathf.Abs(Mathf.Sin(_elapsed * 18.0f)) * 8.0f;
-        Color core = new(0.88f, 0.62f, 1.0f, 0.95f);
-        Color ring = new(0.56f, 0.82f, 1.0f, 0.75f);
+        float t = Mathf.Clamp(_elapsed / 0.50f, 0.0f, 1.0f);
+        Vector2 from = AttackerLaunchPoint() + new Vector2(0, -42);
+        Vector2 to = DefenderCenter() + new Vector2(0, -26);
+        Vector2 center = SnapScreenPixel(from.Lerp(to, t));
+        float pulse = 12.0f + Mathf.Abs(Mathf.Sin(_elapsed * 18.0f)) * 7.0f;
+        int half = Math.Max(6, (int)MathF.Round(pulse));
 
-        DrawCircle(center, pulse, core);
-        DrawArc(center, pulse + 12.0f, 0, Mathf.Tau, 24, ring, 5.0f);
+        Color glow = new(0.57f, 0.78f, 1.0f, 0.55f);
+        Color core = new(0.88f, 0.66f, 1.0f, 0.96f);
+        Color bright = new(0.96f, 0.88f, 1.0f, 0.94f);
+
+        DrawRect(new Rect2(center.X - half - 7, center.Y - 5, (half + 7) * 2, 10), glow, true);
+        DrawRect(new Rect2(center.X - 5, center.Y - half - 7, 10, (half + 7) * 2), glow, true);
+        DrawRect(new Rect2(center.X - half, center.Y - half, half * 2, half * 2), core, true);
+        DrawRect(new Rect2(center.X - 5, center.Y - 5, 10, 10), bright, true);
+
+        float direction = _leftToRight ? 1.0f : -1.0f;
+        for (int index = 1; index <= 3; index++)
+        {
+            Vector2 trail = SnapScreenPixel(center - new Vector2(direction * index * 24.0f, index * 3.0f));
+            int size = Math.Max(4, 11 - index * 2);
+            DrawRect(new Rect2(trail.X - size / 2.0f, trail.Y - size / 2.0f, size, size), glow, true);
+        }
+    }
+
+    /// <summary>返回攻击方武器/施法效果在舞台中的近似发射点。</summary>
+    private Vector2 AttackerLaunchPoint()
+    {
+        return _leftToRight
+            ? new Vector2(Size.X * 0.30f, Size.Y * 0.50f)
+            : new Vector2(Size.X * 0.70f, Size.Y * 0.50f);
+    }
+
+    /// <summary>返回防守方身体中心，用于命中、闪避和飞行终点。</summary>
+    private Vector2 DefenderCenter()
+    {
+        return _leftToRight
+            ? new Vector2(Size.X * 0.73f, Size.Y * 0.50f)
+            : new Vector2(Size.X * 0.27f, Size.Y * 0.50f);
+    }
+
+    /// <summary>把动画坐标锁到整数屏幕像素，避免飞行效果产生半像素模糊。</summary>
+    private static Vector2 SnapScreenPixel(Vector2 value)
+    {
+        return new Vector2(Mathf.Round(value.X), Mathf.Round(value.Y));
     }
 }
