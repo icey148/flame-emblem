@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 人物完整详情页。
-/// 当前展示身份、装备、八维属性和基础战斗派生值；后续转职、背包、技能、支援等分页都会从这里继续扩展。
+/// 展示身份、装备、八维属性和基础战斗派生值，并提供稳定的顶部按钮、Esc 和右键关闭入口。
 /// </summary>
 public partial class CharacterDetailOverlay : PanelContainer
 {
@@ -24,6 +24,9 @@ public partial class CharacterDetailOverlay : PanelContainer
     /// <summary>派生战斗能力文本。</summary>
     private Label? _derivedLabel;
 
+    /// <summary>固定在详情页顶部的关闭按钮，避免内容过高时底部按钮被挤出可视区域。</summary>
+    private Button? _closeButton;
+
     /// <summary>当前详情页人物。</summary>
     private UnitModel? _unit;
 
@@ -34,12 +37,38 @@ public partial class CharacterDetailOverlay : PanelContainer
     {
         Visible = false;
         MouseFilter = MouseFilterEnum.Stop;
+        ProcessMode = ProcessModeEnum.Always;
 
         VBoxContainer root = new()
         {
             CustomMinimumSize = new Vector2(820, 500)
         };
         AddChild(root);
+
+        // 顶部工具栏始终位于第一行，关闭按钮不会被长属性文本挤到底部屏幕之外。
+        HBoxContainer toolbar = new()
+        {
+            CustomMinimumSize = new Vector2(820, 42)
+        };
+        root.AddChild(toolbar);
+
+        _titleLabel = new Label
+        {
+            Text = "人物详情",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        toolbar.AddChild(_titleLabel);
+
+        _closeButton = new Button
+        {
+            Text = "关闭",
+            CustomMinimumSize = new Vector2(96, 36),
+            FocusMode = FocusModeEnum.All
+        };
+        _closeButton.Pressed += HideOverlay;
+        toolbar.AddChild(_closeButton);
 
         HBoxContainer header = new();
         root.AddChild(header);
@@ -55,13 +84,6 @@ public partial class CharacterDetailOverlay : PanelContainer
             CustomMinimumSize = new Vector2(560, 240)
         };
         header.AddChild(summary);
-
-        _titleLabel = new Label
-        {
-            Text = "人物详情",
-            HorizontalAlignment = HorizontalAlignment.Center
-        };
-        summary.AddChild(_titleLabel);
 
         _statsLabel = new Label
         {
@@ -88,30 +110,60 @@ public partial class CharacterDetailOverlay : PanelContainer
         };
         root.AddChild(futureTabs);
 
-        Button closeButton = new()
+        Label closeHint = new()
         {
-            Text = "关闭人物详情"
+            Text = "Esc / 右键也可以关闭人物详情",
+            HorizontalAlignment = HorizontalAlignment.Center
         };
-        closeButton.Pressed += HideOverlay;
-        root.AddChild(closeButton);
+        root.AddChild(closeHint);
     }
 
     /// <summary>
-    /// 打开指定人物的详情页。
+    /// 打开指定人物的详情页，并把键盘焦点交给关闭按钮，保证 Esc/Enter 等 GUI 输入稳定。
     /// </summary>
     public void ShowUnit(UnitModel unit)
     {
         _unit = unit;
         Visible = true;
         RefreshContent();
+        _closeButton?.GrabFocus();
     }
 
     /// <summary>
-    /// 关闭详情页，不修改任何人物状态。
+    /// 关闭详情页并清理当前人物表现引用。
+    /// 清理引用可防止隐藏后的旧头像/文字继续作为下一次打开时的瞬时残留。
     /// </summary>
     public void HideOverlay()
     {
         Visible = false;
+        _unit = null;
+        _portrait?.SetUnit(null);
+        _closeButton?.ReleaseFocus();
+    }
+
+    /// <summary>
+    /// 详情页可见时允许 Esc 或右键立即关闭。
+    /// 这些入口独立于按钮布局，即使以后详情内容继续增加也不会再次出现“打不开关闭按钮”的问题。
+    /// </summary>
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        bool cancelPressed = @event.IsActionPressed("ui_cancel");
+        bool rightClickPressed = @event is InputEventMouseButton mouseButton &&
+                                 mouseButton.ButtonIndex == MouseButton.Right &&
+                                 mouseButton.Pressed;
+
+        if (!cancelPressed && !rightClickPressed)
+        {
+            return;
+        }
+
+        HideOverlay();
+        GetViewport().SetInputAsHandled();
     }
 
     /// <summary>
