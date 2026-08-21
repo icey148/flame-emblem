@@ -6,7 +6,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 为当前选中的玩家单位显示明确的行动菜单。
-/// 单位不需要先移动：如果原地已有敌人在攻击范围内，可以直接攻击；移动后仍会等待行走动画结束再显示菜单。
+/// 单位不需要先移动；攻击范围内存在多个敌人时可以用按钮循环切换，也可以直接点击地图敌军选择目标。
 /// </summary>
 public partial class PostMoveActionCoordinator : Node
 {
@@ -37,11 +37,17 @@ public partial class PostMoveActionCoordinator : Node
     /// <summary>当前单位行动菜单。</summary>
     private PanelContainer? _panel;
 
-    /// <summary>提示当前可以执行什么行动。</summary>
+    /// <summary>提示当前可以执行什么行动以及当前目标。</summary>
     private Label? _messageLabel;
 
-    /// <summary>自动锁定一个可攻击敌人的按钮。</summary>
+    /// <summary>进入目标选择的攻击按钮。</summary>
     private Button? _attackButton;
+
+    /// <summary>切换到上一个可攻击目标。</summary>
+    private Button? _previousTargetButton;
+
+    /// <summary>切换到下一个可攻击目标。</summary>
+    private Button? _nextTargetButton;
 
     /// <summary>结束当前单位行动的等待按钮。</summary>
     private Button? _waitButton;
@@ -49,9 +55,7 @@ public partial class PostMoveActionCoordinator : Node
     /// <summary>上一次用于刷新面板的状态签名。</summary>
     private string _lastState = string.Empty;
 
-    /// <summary>
-    /// 缓存 MainGame 所需成员并创建行动菜单。
-    /// </summary>
+    /// <summary>缓存 MainGame 所需成员并创建行动菜单。</summary>
     public override void _Ready()
     {
         _battleHost = GetParent();
@@ -90,7 +94,7 @@ public partial class PostMoveActionCoordinator : Node
 
     /// <summary>
     /// 每帧检查当前选中单位并显示行动菜单。
-    /// 原地选择后立即可行动；发生移动时则等人物真正走到目标格以后再恢复菜单。
+    /// 锁定攻击目标后菜单仍然保留，这样多个敌人时可以继续切换目标，而不是被锁死在第一个目标上。
     /// </summary>
     public override void _Process(double delta)
     {
@@ -100,7 +104,6 @@ public partial class PostMoveActionCoordinator : Node
         bool movementAnimating = _visualCoordinator?.IsMovementAnimating ?? false;
 
         bool shouldShow = selectedUnit is { Team: UnitTeam.Player } &&
-                          pendingTarget is null &&
                           !selectedUnit.HasActed &&
                           !movementAnimating &&
                           !BattleAnimationBus.IsPlaybackActive;
@@ -117,20 +120,20 @@ public partial class PostMoveActionCoordinator : Node
         }
 
         IReadOnlyList<UnitModel> targets = FindAttackableTargets(selectedUnit);
+        string targetSignature = string.Join(",", targets.Select(target => target.Id));
         string state =
-            $"{selectedUnit.Id}:{selectedUnit.GridPosition}:{selectedUnit.EquippedWeapon.Id}:{hasMoved}:{targets.Count}";
+            $"{selectedUnit.Id}:{selectedUnit.GridPosition}:{selectedUnit.EquippedWeapon.Id}:{hasMoved}:" +
+            $"pending={pendingTarget?.Id ?? "none"}:targets={targetSignature}";
         if (state == _lastState)
         {
             return;
         }
 
         _lastState = state;
-        RefreshPanel(selectedUnit, targets, hasMoved);
+        RefreshPanel(selectedUnit, targets, pendingTarget, hasMoved);
     }
 
-    /// <summary>
-    /// 创建地图右下方的行动菜单。
-    /// </summary>
+    /// <summary>创建地图右下方的行动菜单。</summary>
     private void CreatePanel()
     {
         CanvasLayer layer = new()
@@ -141,8 +144,8 @@ public partial class PostMoveActionCoordinator : Node
 
         _panel = new PanelContainer
         {
-            Position = new Vector2(610, 430),
-            Size = new Vector2(220, 155),
+            Position = new Vector2(600, 390),
+            Size = new Vector2(240, 195),
             Visible = false
         };
         layer.AddChild(_panel);
@@ -155,7 +158,7 @@ public partial class PostMoveActionCoordinator : Node
 
         Label title = new()
         {
-            Text = "行动",
+            Text = "行动 / 目标",
             HorizontalAlignment = HorizontalAlignment.Center
         };
         column.AddChild(title);
@@ -163,17 +166,39 @@ public partial class PostMoveActionCoordinator : Node
         _messageLabel = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(200, 62),
+            CustomMinimumSize = new Vector2(220, 72),
             HorizontalAlignment = HorizontalAlignment.Center
         };
         column.AddChild(_messageLabel);
 
         _attackButton = new Button
         {
-            Text = "攻击"
+            Text = "选择攻击目标"
         };
         _attackButton.Pressed += OnAttackPressed;
         column.AddChild(_attackButton);
+
+        HBoxContainer targetRow = new()
+        {
+            Alignment = BoxContainer.AlignmentMode.Center
+        };
+        column.AddChild(targetRow);
+
+        _previousTargetButton = new Button
+        {
+            Text = "◀ 上一目标",
+            CustomMinimumSize = new Vector2(110, 34)
+        };
+        _previousTargetButton.Pressed += () => SelectTargetByOffset(-1);
+        targetRow.AddChild(_previousTargetButton);
+
+        _nextTargetButton = new Button
+        {
+            Text = "下一目标 ▶",
+            CustomMinimumSize = new Vector2(110, 34)
+        };
+        _nextTargetButton.Pressed += () => SelectTargetByOffset(1);
+        targetRow.AddChild(_nextTargetButton);
 
         _waitButton = new Button
         {
@@ -184,31 +209,68 @@ public partial class PostMoveActionCoordinator : Node
     }
 
     /// <summary>
-    /// 根据当前是否移动以及可攻击敌人数刷新提示。
-    /// 原地有目标时明确告诉玩家“可以直接攻击”，避免误以为移动是攻击前置条件。
+    /// 刷新行动菜单和目标切换按钮。
+    /// 多目标时明确显示当前目标编号，避免玩家不知道预测对应的是哪一个敌人。
     /// </summary>
-    private void RefreshPanel(UnitModel selectedUnit, IReadOnlyList<UnitModel> targets, bool hasMoved)
+    private void RefreshPanel(
+        UnitModel selectedUnit,
+        IReadOnlyList<UnitModel> targets,
+        UnitModel? pendingTarget,
+        bool hasMoved)
     {
+        int currentIndex = pendingTarget is null
+            ? -1
+            : targets.ToList().FindIndex(target => ReferenceEquals(target, pendingTarget));
+
         if (_messageLabel is not null)
         {
-            if (hasMoved)
+            if (pendingTarget is not null && currentIndex >= 0)
             {
-                _messageLabel.Text = targets.Count > 0
-                    ? $"{selectedUnit.DisplayName} 已到达。\n射程内有 {targets.Count} 个敌人。"
-                    : $"{selectedUnit.DisplayName} 已到达。\n当前射程内没有敌人。";
+                _messageLabel.Text =
+                    $"目标 {currentIndex + 1}/{targets.Count}：{pendingTarget.DisplayName}\n" +
+                    "可直接点其他红色敌军，或用下方按钮切换。";
+            }
+            else if (targets.Count > 1)
+            {
+                _messageLabel.Text =
+                    $"射程内有 {targets.Count} 个敌人。\n请点敌军，或用上一/下一目标选择。";
+            }
+            else if (targets.Count == 1)
+            {
+                _messageLabel.Text = hasMoved
+                    ? $"{selectedUnit.DisplayName} 已到达。\n射程内有 1 个敌人。"
+                    : "当前有 1 个可攻击目标。\n也可以先移动。";
             }
             else
             {
-                _messageLabel.Text = targets.Count > 0
-                    ? $"当前即可攻击 {targets.Count} 个敌人。\n也可以先选择蓝色格移动。"
+                _messageLabel.Text = hasMoved
+                    ? $"{selectedUnit.DisplayName} 已到达。\n当前射程内没有敌人。"
                     : "当前没有攻击目标。\n可以移动，或原地等待。";
             }
         }
 
+        bool canAttack = targets.Count > 0 && selectedUnit.CanUseEquippedWeapon;
         if (_attackButton is not null)
         {
-            _attackButton.Disabled = targets.Count == 0 || !selectedUnit.CanUseEquippedWeapon;
-            _attackButton.Text = targets.Count > 0 ? $"攻击（{targets.Count}）" : "攻击（无目标）";
+            _attackButton.Disabled = !canAttack;
+            _attackButton.Text = pendingTarget is not null
+                ? $"当前目标：{pendingTarget.DisplayName}"
+                : targets.Count > 0
+                    ? $"选择攻击目标（{targets.Count}）"
+                    : "攻击（无目标）";
+        }
+
+        bool canCycle = canAttack && targets.Count > 1;
+        if (_previousTargetButton is not null)
+        {
+            _previousTargetButton.Visible = targets.Count > 1;
+            _previousTargetButton.Disabled = !canCycle;
+        }
+
+        if (_nextTargetButton is not null)
+        {
+            _nextTargetButton.Visible = targets.Count > 1;
+            _nextTargetButton.Disabled = !canCycle;
         }
 
         if (_waitButton is not null)
@@ -218,15 +280,12 @@ public partial class PostMoveActionCoordinator : Node
     }
 
     /// <summary>
-    /// 点击攻击按钮时自动锁定距离最近的可攻击敌人。
-    /// 无论单位是否移动过都可以调用；玩家仍然可以直接点击地图上的敌军选择具体目标。
+    /// 单目标时直接锁定；多目标时第一次点击只进入目标选择，并允许随后循环切换。
+    /// 不再把“距离最近”当作玩家不可更改的最终选择。
     /// </summary>
     private void OnAttackPressed()
     {
-        if (_battleHost is null ||
-            _setPendingAttackTargetMethod is null ||
-            (_visualCoordinator?.IsMovementAnimating ?? false) ||
-            BattleAnimationBus.IsPlaybackActive)
+        if (!CanChangeTarget())
         {
             return;
         }
@@ -237,22 +296,91 @@ public partial class PostMoveActionCoordinator : Node
             return;
         }
 
-        UnitModel? target = FindAttackableTargets(selectedUnit)
-            .OrderBy(enemy => CombatRules.GridDistance(selectedUnit.GridPosition, enemy.GridPosition))
-            .ThenBy(enemy => enemy.Id, StringComparer.Ordinal)
-            .FirstOrDefault();
+        IReadOnlyList<UnitModel> targets = FindAttackableTargets(selectedUnit);
+        if (targets.Count == 0)
+        {
+            return;
+        }
 
-        if (target is null)
+        UnitModel? pendingTarget = ReadPendingTarget();
+        if (pendingTarget is not null && targets.Any(target => ReferenceEquals(target, pendingTarget)))
+        {
+            // 已经有合法目标时不强制改成最近目标；让玩家自行确认或继续切换。
+            return;
+        }
+
+        SetPendingTarget(targets[0]);
+    }
+
+    /// <summary>
+    /// 从当前目标向前/向后循环选择攻击范围内敌人。
+    /// 当前尚未锁定目标时，“下一目标”从第一个开始，“上一目标”从最后一个开始。
+    /// </summary>
+    private void SelectTargetByOffset(int offset)
+    {
+        if (!CanChangeTarget())
+        {
+            return;
+        }
+
+        UnitModel? selectedUnit = ReadSelectedUnit();
+        if (selectedUnit is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<UnitModel> targets = FindAttackableTargets(selectedUnit);
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        UnitModel? current = ReadPendingTarget();
+        int currentIndex = current is null
+            ? -1
+            : targets.ToList().FindIndex(target => ReferenceEquals(target, current));
+
+        int nextIndex;
+        if (currentIndex < 0)
+        {
+            nextIndex = offset < 0 ? targets.Count - 1 : 0;
+        }
+        else
+        {
+            nextIndex = (currentIndex + offset) % targets.Count;
+            if (nextIndex < 0)
+            {
+                nextIndex += targets.Count;
+            }
+        }
+
+        SetPendingTarget(targets[nextIndex]);
+    }
+
+    /// <summary>调用 MainGame 的目标锁定方法，使地图边框、预测和确认按钮同步刷新。</summary>
+    private void SetPendingTarget(UnitModel target)
+    {
+        if (_battleHost is null || _setPendingAttackTargetMethod is null)
         {
             return;
         }
 
         _setPendingAttackTargetMethod.Invoke(_battleHost, new object[] { target });
+        _lastState = string.Empty;
+    }
+
+    /// <summary>目标选择只允许在地图人物停止移动且横向战斗演出未播放时执行。</summary>
+    private bool CanChangeTarget()
+    {
+        return _battleHost is not null &&
+               _setPendingAttackTargetMethod is not null &&
+               !(_visualCoordinator?.IsMovementAnimating ?? false) &&
+               !BattleAnimationBus.IsPlaybackActive;
     }
 
     /// <summary>
     /// 点击等待按钮时复用 MainGame 原有等待逻辑。
-    /// 因此原地不移动也可以直接结束当前单位行动，这是标准战棋操作的一部分。
+    /// 因此原地不移动也可以直接结束当前单位行动。
     /// </summary>
     private void OnWaitPressed()
     {
@@ -269,6 +397,7 @@ public partial class PostMoveActionCoordinator : Node
 
     /// <summary>
     /// 查找当前单位实际可以攻击的全部存活敌人。
+    /// 固定按距离、坐标和 ID 排序，使上一/下一目标的循环顺序稳定可预测。
     /// </summary>
     private IReadOnlyList<UnitModel> FindAttackableTargets(UnitModel selectedUnit)
     {
@@ -276,6 +405,10 @@ public partial class PostMoveActionCoordinator : Node
             .Where(unit => unit.IsAlive &&
                            unit.Team == UnitTeam.Enemy &&
                            CombatRules.CanAttack(selectedUnit, unit))
+            .OrderBy(unit => CombatRules.GridDistance(selectedUnit.GridPosition, unit.GridPosition))
+            .ThenBy(unit => unit.GridPosition.Y)
+            .ThenBy(unit => unit.GridPosition.X)
+            .ThenBy(unit => unit.Id, StringComparer.Ordinal)
             .ToList();
     }
 
