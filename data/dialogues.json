@@ -4,38 +4,38 @@
       "chapter_id": "chapter_01",
       "event": "start",
       "lines": [
-        { "speaker_id": "adrian", "speaker_name": "Adrian", "side": "left", "text": "石桥已经断了大半，但东岸还有敌军守着唯一能过河的地方。我们从这里突破。" },
-        { "speaker_id": "celine", "speaker_name": "Celine", "side": "right", "text": "森林能遮住他们的视线。我会跟在侧翼，谁敢靠近桥面，我就先压住他。" },
-        { "speaker_id": "rowan", "speaker_name": "Rowan", "side": "left", "text": "别把队伍挤在桥口。让我先顶住正面，你们从能走的地方穿过去。" },
-        { "speaker_id": "mira", "speaker_name": "Mira", "side": "right", "text": "河风里有烧焦的味道。对面不是临时驻扎，他们是在等我们。" }
+        { "speaker_id": "adrian", "speaker_name": "亚德里安", "side": "left", "text": "石桥已经断了大半，但东岸还有敌军守着唯一能过河的地方。我们从这里突破。" },
+        { "speaker_id": "celine", "speaker_name": "塞琳", "side": "right", "text": "森林能遮住他们的视线。我会跟在侧翼，谁敢靠近桥面，我就先压住他。" },
+        { "speaker_id": "rowan", "speaker_name": "罗文", "side": "left", "text": "别把队伍挤在桥口。让我先顶住正面，你们从能走的地方穿过去。" },
+        { "speaker_id": "mira", "speaker_name": "米拉", "side": "right", "text": "河风里有烧焦的味道。对面不是临时驻扎，他们是在等我们。" }
       ]
     },
     {
       "chapter_id": "chapter_01",
       "event": "victory",
       "lines": [
-        { "speaker_id": "mira", "speaker_name": "Mira", "side": "right", "text": "桥头安静下来了。东边的路还在延伸，那里应该还有更多驻军。" },
-        { "speaker_id": "adrian", "speaker_name": "Adrian", "side": "left", "text": "先把伤口处理好。前面的旧祠堂还能避风，之后我们再沿东境道路继续。" },
-        { "speaker_id": "celine", "speaker_name": "Celine", "side": "right", "text": "那就走吧。既然他们守着这条路，说明我们走对方向了。" }
+        { "speaker_id": "mira", "speaker_name": "米拉", "side": "right", "text": "桥头安静下来了。东边的路还在延伸，那里应该还有更多驻军。" },
+        { "speaker_id": "adrian", "speaker_name": "亚德里安", "side": "left", "text": "先把伤口处理好。前面的旧祠堂还能避风，之后我们再沿东境道路继续。" },
+        { "speaker_id": "celine", "speaker_name": "塞琳", "side": "right", "text": "那就走吧。既然他们守着这条路，说明我们走对方向了。" }
       ]
     },
     {
       "chapter_id": "chapter_02",
       "event": "start",
       "lines": [
-        { "speaker_id": "mira", "speaker_name": "Mira", "side": "right", "text": "前面的河道比石桥那里窄，但树林更密。敌人把守卫分散在两侧据点。" },
-        { "speaker_id": "adrian", "speaker_name": "Adrian", "side": "left", "text": "我们不追着每个人跑。稳住阵形，把路上的守军逐个清掉。" },
-        { "speaker_id": "rowan", "speaker_name": "Rowan", "side": "right", "text": "只剩一座窄桥能过河。先把近处的敌人压回去，再决定谁过桥。" },
-        { "speaker_id": "celine", "speaker_name": "Celine", "side": "left", "text": "东侧高地有人影。我会盯着远处，你们别在河边停太久。" }
+        { "speaker_id": "mira", "speaker_name": "米拉", "side": "right", "text": "前面的河道比石桥那里窄，但树林更密。敌人把守卫分散在两侧据点。" },
+        { "speaker_id": "adrian", "speaker_name": "亚德里安", "side": "left", "text": "我们不追着每个人跑。稳住阵形，把路上的守军逐个清掉。" },
+        { "speaker_id": "rowan", "speaker_name": "罗文", "side": "right", "text": "只剩一座窄桥能过河。先把近处的敌人压回去，再决定谁过桥。" },
+        { "speaker_id": "celine", "speaker_name": "塞琳", "side": "left", "text": "东侧高地有人影。我会盯着远处，你们别在河边停太久。" }
       ]
     },
     {
       "chapter_id": "chapter_02",
       "event": "victory",
       "lines": [
-        { "speaker_id": "celine", "speaker_name": "Celine", "side": "left", "text": "最后一队也退下去了。再往东，路面开始变宽，应该离有人居住的地方不远。" },
-        { "speaker_id": "rowan", "speaker_name": "Rowan", "side": "right", "text": "这批守军装备比桥头那群人整齐。下一次碰上的，恐怕就不是散兵了。" },
-        { "speaker_id": "adrian", "speaker_name": "Adrian", "side": "left", "text": "那就更不能急。先确认大家的状态，再决定下一段路怎么走。" }
+        { "speaker_id": "celine", "speaker_name": "塞琳", "side": "left", "text": "最后一队也退下去了。再往东，路面开始变宽，应该离有人居住的地方不远。" },
+        { "speaker_id": "rowan", "speaker_name": "罗文", "side": "right", "text": "这批守军装备比桥头那群人整齐。下一次碰上的，恐怕就不是散兵了。" },
+        { "speaker_id": "adrian", "speaker_name": "亚德里安", "side": "left", "text": "那就更不能急。先确认大家的状态，再决定下一段路怎么走。" }
       ]
     }
   ]
