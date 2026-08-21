@@ -240,6 +240,7 @@ public partial class SaveGameCoordinator : Node
             UnitSaveData state = restore.State;
             restore.Unit.RestoreRuntimeState(
                 new Vector2I(state.X, state.Y),
+                restore.ClassDefinition,
                 restore.Weapon,
                 state.Level,
                 state.Experience,
@@ -344,9 +345,11 @@ public partial class SaveGameCoordinator : Node
                 return false;
             }
 
-            if (!unit.ClassDefinition.Id.Equals(state.ClassId, StringComparison.OrdinalIgnoreCase))
+            // 转职后的职业允许与章节初始职业不同，但必须仍然存在于当前版本 classes.json。
+            UnitClassDefinition? classDefinition = UnitClassCatalog.TryGet(state.ClassId);
+            if (classDefinition is null)
             {
-                message = $"{unit.DisplayName} 的职业数据与当前版本不一致，已拒绝读取。";
+                message = $"存档引用了不存在的职业：{state.ClassId}。";
                 return false;
             }
 
@@ -371,7 +374,7 @@ public partial class SaveGameCoordinator : Node
                 return false;
             }
 
-            restores.Add(new ValidatedUnitRestore(unit, state, weapon));
+            restores.Add(new ValidatedUnitRestore(unit, state, classDefinition, weapon));
         }
 
         message = "存档验证通过。";
@@ -528,5 +531,6 @@ public partial class SaveGameCoordinator : Node
     private sealed record ValidatedUnitRestore(
         UnitModel Unit,
         UnitSaveData State,
+        UnitClassDefinition ClassDefinition,
         WeaponDefinition Weapon);
 }
