@@ -352,7 +352,7 @@ public sealed class UnitModel
 
     /// <summary>
     /// 根据角色成长率处理一次升级。
-    /// 原型使用“角色 ID + 新等级 + 属性名”生成稳定结果，因此同一角色同一级不会因为重新运行而反复刷成长。
+    /// 原型使用“角色 ID + 当前职业 ID + 新等级 + 属性名”生成稳定结果；转职重置等级后也不会重复上一职业同等级的成长序列。
     /// </summary>
     private LevelUpResult ApplyLevelGrowth()
     {
@@ -427,7 +427,8 @@ public sealed class UnitModel
             return true;
         }
 
-        string seedText = $"{Id}:{Level}:{statKey}";
+        // 职业 ID 纳入种子，转职后从 Lv.1 重新成长时会进入新的稳定成长序列。
+        string seedText = $"{Id}:{ClassDefinition.Id}:{Level}:{statKey}";
         uint hash = 2166136261;
 
         // FNV-1a 提供简单稳定的跨运行哈希，足够用于当前升级成长率判定。
