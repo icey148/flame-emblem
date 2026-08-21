@@ -135,6 +135,32 @@ public static class CharacterAppearanceCatalog
                 CharacterBodySilhouette.Robed);
         }
 
+        // 未来新增的我方角色即使暂时没有个人外观，也必须保持深蓝阵营主体，不能掉进敌方粉红回退。
+        if (unit.Team == UnitTeam.Player)
+        {
+            CharacterWeaponSilhouette weapon = unit.EquippedWeapon.DamageType == DamageType.Magical
+                ? CharacterWeaponSilhouette.Tome
+                : classId.Contains("arch", StringComparison.OrdinalIgnoreCase) || classId.Contains("bow", StringComparison.OrdinalIgnoreCase)
+                    ? CharacterWeaponSilhouette.Bow
+                    : classId.Contains("spear", StringComparison.OrdinalIgnoreCase) || classId.Contains("lancer", StringComparison.OrdinalIgnoreCase)
+                        ? CharacterWeaponSilhouette.Spear
+                        : CharacterWeaponSilhouette.Sword;
+            CharacterBodySilhouette body = weapon == CharacterWeaponSilhouette.Tome
+                ? CharacterBodySilhouette.Robed
+                : classId.Contains("guard", StringComparison.OrdinalIgnoreCase) || classId.Contains("armor", StringComparison.OrdinalIgnoreCase)
+                    ? CharacterBodySilhouette.Armored
+                    : CharacterBodySilhouette.Light;
+
+            return new CharacterAppearanceDefinition(
+                new Color("59463c"),
+                PlayerNavy,
+                new Color("c5a56a"),
+                new Color("dfaF8c"),
+                false,
+                weapon,
+                body);
+        }
+
         // 通用敌军全部使用粉红/玫红主体。职业区别仍由身体轮廓、金属量和武器决定。
         return classId switch
         {
