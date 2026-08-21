@@ -2,7 +2,7 @@
   "units": [
     {
       "id": "adrian",
-      "name": "Adrian",
+      "name": "亚德里安",
       "class_id": "vanguard",
       "weapon_id": "iron_sword",
       "level": 1,
@@ -18,7 +18,7 @@
     },
     {
       "id": "celine",
-      "name": "Celine",
+      "name": "塞琳",
       "class_id": "scout",
       "weapon_id": "short_bow",
       "level": 1,
@@ -34,7 +34,7 @@
     },
     {
       "id": "rowan",
-      "name": "Rowan",
+      "name": "罗文",
       "class_id": "soldier",
       "weapon_id": "iron_spear",
       "level": 2,
@@ -50,7 +50,7 @@
     },
     {
       "id": "mira",
-      "name": "Mira",
+      "name": "米拉",
       "class_id": "mage",
       "weapon_id": "ember",
       "level": 1,
@@ -66,7 +66,7 @@
     },
     {
       "id": "raider",
-      "name": "Raider",
+      "name": "掠夺者",
       "class_id": "raider",
       "weapon_id": "raider_axe",
       "level": 1,
@@ -82,7 +82,7 @@
     },
     {
       "id": "guard",
-      "name": "Guard",
+      "name": "守卫",
       "class_id": "guard",
       "weapon_id": "guard_spear",
       "level": 2,
@@ -98,7 +98,7 @@
     },
     {
       "id": "bridge_captain",
-      "name": "Bridge Captain",
+      "name": "桥头队长",
       "class_id": "captain",
       "weapon_id": "captain_blade",
       "level": 4,
