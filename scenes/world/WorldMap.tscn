@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+; 世界地图只负责跨章节路线与节点交互，战斗仍使用统一 Main.tscn。
+[ext_resource type="Script" path="res://scripts/world/WorldMapScreen.cs" id="1_world_map"]
+
+[node name="WorldMap" type="Node2D"]
+script = ExtResource("1_world_map")
