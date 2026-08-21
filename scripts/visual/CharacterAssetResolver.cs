@@ -3,10 +3,7 @@ using Godot;
 
 namespace FlameEmblem.Visual;
 
-/// <summary>
-/// 定义人物美术在游戏中的使用槽位。
-/// 地图小人、人物头像和战斗演出分别使用独立素材，方便逐步替换而不耦合战斗规则。
-/// </summary>
+/// <summary>人物美术在游戏中的三个固定用途。</summary>
 public enum CharacterArtSlot
 {
     Map,
@@ -15,88 +12,79 @@ public enum CharacterArtSlot
 }
 
 /// <summary>
-/// 统一解析人物正式美术资源路径。
-/// 除了兼容旧版独立 PNG，本解析器也支持一个角色只放一张 sheet.png：
-/// 同一张图集同时提供 64×64 头像、32×32 四方向地图帧和 96×96 战斗动作帧，
-/// 从根源上保证地图、对话与战斗中的人物设计保持一致。
+/// 统一解析人物正式美术。
+/// 兼容旧独立 PNG，同时优先支持每个角色一张 512×576 的 sheet.svg：
+/// 左上 64×64 为头像，左侧为 32×32 地图帧，右侧为 96×96 战斗帧。
 /// </summary>
 public static class CharacterAssetResolver
 {
-    /// <summary>缓存已经成功加载的纹理或 AtlasTexture，避免每帧重复读取资源。</summary>
+    /// <summary>缓存已加载纹理和图集切片。</summary>
     private static readonly Dictionary<string, Texture2D> TextureCache = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>缓存某个动画状态实际拥有的连续帧数。</summary>
+    /// <summary>缓存动画帧数，避免每帧重复检查资源。</summary>
     private static readonly Dictionary<string, int> FrameCountCache = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>统一角色图集宽度；当前生产规格为 512×576。</summary>
     private const int SheetWidth = 512;
-
-    /// <summary>统一角色图集高度；当前生产规格为 512×576。</summary>
     private const int SheetHeight = 576;
+    private const int MapOriginY = 64;
+    private const int MapCell = 32;
+    private const int BattleOriginX = 112;
+    private const int BattleCell = 96;
+    private static readonly Rect2 PortraitRegion = new(0, 0, 64, 64);
 
-    /// <summary>头像固定占据图集左上角 64×64。</summary>
-    private static readonly Rect2 PortraitSheetRegion = new(0, 0, 64, 64);
-
-    /// <summary>地图帧区域从 y=64 开始，每格 32×32。</summary>
-    private const int MapSheetOriginY = 64;
-
-    /// <summary>地图帧固定边长。</summary>
-    private const int MapSheetCellSize = 32;
-
-    /// <summary>战斗帧区域从 x=112 开始，每格 96×96。</summary>
-    private const int BattleSheetOriginX = 112;
-
-    /// <summary>战斗帧固定边长。</summary>
-    private const int BattleSheetCellSize = 96;
-
-    /// <summary>
-    /// 尝试为指定人物和用途加载单张纹理。
-    /// 查找顺序为：人物实例 ID → 职业 ID → enemy_default/player_default。
-    /// 每个键优先兼容旧独立 PNG，没有时再从统一 sheet.png 切片。
-    /// </summary>
+    /// <summary>按人物 ID、职业 ID、阵营默认值的顺序寻找单张美术。</summary>
     public static Texture2D? TryLoad(UnitModel unit, CharacterArtSlot slot)
     {
         foreach (string key in CandidateKeys(unit))
         {
-            Texture2D? legacyTexture = TryLoadPath(BuildPath(key, slot));
-            if (legacyTexture is not null)
+            // 旧项目若已经放入独立 PNG，仍然拥有最高优先级。
+            Texture2D? legacy = TryLoadPath(BuildLegacyPath(key, slot));
+            if (legacy is not null)
             {
-                return legacyTexture;
+                return legacy;
             }
 
-            Texture2D? sheetTexture = TryLoadSingleSheetSlot(key, slot);
-            if (sheetTexture is not null)
+            Rect2 region = slot switch
             {
-                return sheetTexture;
+                CharacterArtSlot.Portrait => PortraitRegion,
+                CharacterArtSlot.Map => BuildMapRegion(CharacterAnimationState.Idle, CharacterFacing.Down, 0),
+                CharacterArtSlot.Battle => BuildBattleRegion(CharacterAnimationState.Idle, 0),
+                _ => PortraitRegion
+            };
+            Texture2D? sheet = TryLoadSheetRegion(key, $"slot:{slot}", region);
+            if (sheet is not null)
+            {
+                return sheet;
             }
         }
 
         return null;
     }
 
-    /// <summary>
-    /// 获取地图人物某个动画状态和方向实际存在的帧数。
-    /// 旧独立文件仍按连续编号扫描；统一图集则使用固定的待机 2 帧、行走 3 帧规格。
-    /// </summary>
+    /// <summary>返回地图待机/行走动画实际可用的帧数。</summary>
     public static int GetMapFrameCount(UnitModel unit, CharacterAnimationState state, CharacterFacing facing)
     {
         foreach (string key in CandidateKeys(unit))
         {
             string cacheKey = $"map:{key}:{state}:{facing}";
-            if (FrameCountCache.TryGetValue(cacheKey, out int cachedCount))
+            if (FrameCountCache.TryGetValue(cacheKey, out int cached))
             {
-                if (cachedCount > 0)
+                if (cached > 0)
                 {
-                    return cachedCount;
+                    return cached;
                 }
-
                 continue;
             }
 
-            int count = CountContinuousFrames(index => BuildMapFramePath(key, state, facing, index));
+            int count = CountContinuousFrames(index => BuildLegacyMapFramePath(key, state, facing, index));
             if (count <= 0 && HasValidSheet(key))
             {
-                count = MapSheetFrameCount(state);
+                count = state switch
+                {
+                    CharacterAnimationState.Idle => 2,
+                    CharacterAnimationState.Walk => 3,
+                    _ => 0
+                };
             }
 
             FrameCountCache[cacheKey] = count;
@@ -109,10 +97,7 @@ public static class CharacterAssetResolver
         return 0;
     }
 
-    /// <summary>
-    /// 加载地图人物的一张方向序列帧。
-    /// 先兼容旧独立文件，再从统一角色图集读取对应状态、方向和帧号。
-    /// </summary>
+    /// <summary>加载一张地图方向帧；旧独立 PNG 不存在时从正式图集切片。</summary>
     public static Texture2D? TryLoadMapFrame(
         UnitModel unit,
         CharacterAnimationState state,
@@ -122,45 +107,56 @@ public static class CharacterAssetResolver
         foreach (string key in CandidateKeys(unit))
         {
             int safeIndex = Math.Max(0, frameIndex);
-            Texture2D? legacyTexture = TryLoadPath(BuildMapFramePath(key, state, facing, safeIndex));
-            if (legacyTexture is not null)
+            Texture2D? legacy = TryLoadPath(BuildLegacyMapFramePath(key, state, facing, safeIndex));
+            if (legacy is not null)
             {
-                return legacyTexture;
+                return legacy;
             }
 
-            Texture2D? sheetTexture = TryLoadMapSheetFrame(key, state, facing, safeIndex);
-            if (sheetTexture is not null)
+            int count = state switch
             {
-                return sheetTexture;
+                CharacterAnimationState.Idle => 2,
+                CharacterAnimationState.Walk => 3,
+                _ => 0
+            };
+            if (count <= 0 || !HasValidSheet(key))
+            {
+                continue;
+            }
+
+            safeIndex = Math.Clamp(safeIndex, 0, count - 1);
+            Texture2D? sheet = TryLoadSheetRegion(
+                key,
+                $"map:{state}:{facing}:{safeIndex}",
+                BuildMapRegion(state, facing, safeIndex));
+            if (sheet is not null)
+            {
+                return sheet;
             }
         }
 
         return null;
     }
 
-    /// <summary>
-    /// 获取独立战斗演出某个状态实际存在的连续帧数。
-    /// 统一图集固定提供待机、攻击、施法、受击、闪避和倒下动作。
-    /// </summary>
+    /// <summary>返回正式横向战斗动作的帧数。</summary>
     public static int GetBattleFrameCount(UnitModel unit, CharacterAnimationState state)
     {
         foreach (string key in CandidateKeys(unit))
         {
             string cacheKey = $"battle:{key}:{state}";
-            if (FrameCountCache.TryGetValue(cacheKey, out int cachedCount))
+            if (FrameCountCache.TryGetValue(cacheKey, out int cached))
             {
-                if (cachedCount > 0)
+                if (cached > 0)
                 {
-                    return cachedCount;
+                    return cached;
                 }
-
                 continue;
             }
 
-            int count = CountContinuousFrames(index => BuildBattleFramePath(key, state, index));
+            int count = CountContinuousFrames(index => BuildLegacyBattleFramePath(key, state, index));
             if (count <= 0 && HasValidSheet(key))
             {
-                count = BattleSheetFrameCount(state);
+                count = BattleFrameCount(state);
             }
 
             FrameCountCache[cacheKey] = count;
@@ -173,84 +169,78 @@ public static class CharacterAssetResolver
         return 0;
     }
 
-    /// <summary>
-    /// 加载独立战斗演出的一张序列帧。
-    /// 旧独立文件优先；不存在时直接从统一角色图集切出对应 96×96 帧。
-    /// </summary>
+    /// <summary>加载战斗动作帧；正式图集提供待机、攻击、施法、受击、闪避与倒下。</summary>
     public static Texture2D? TryLoadBattleFrame(UnitModel unit, CharacterAnimationState state, int frameIndex)
     {
         foreach (string key in CandidateKeys(unit))
         {
             int safeIndex = Math.Max(0, frameIndex);
-            Texture2D? legacyTexture = TryLoadPath(BuildBattleFramePath(key, state, safeIndex));
-            if (legacyTexture is not null)
+            Texture2D? legacy = TryLoadPath(BuildLegacyBattleFramePath(key, state, safeIndex));
+            if (legacy is not null)
             {
-                return legacyTexture;
+                return legacy;
             }
 
-            Texture2D? sheetTexture = TryLoadBattleSheetFrame(key, state, safeIndex);
-            if (sheetTexture is not null)
+            int count = BattleFrameCount(state);
+            if (count <= 0 || !HasValidSheet(key))
             {
-                return sheetTexture;
+                continue;
+            }
+
+            safeIndex = Math.Clamp(safeIndex, 0, count - 1);
+            Texture2D? sheet = TryLoadSheetRegion(
+                key,
+                $"battle:{state}:{safeIndex}",
+                BuildBattleRegion(state, safeIndex));
+            if (sheet is not null)
+            {
+                return sheet;
             }
         }
 
         return null;
     }
 
-    /// <summary>从统一图集读取 Portrait、Map 或 Battle 的默认静态图。</summary>
-    private static Texture2D? TryLoadSingleSheetSlot(string key, CharacterArtSlot slot)
+    /// <summary>统一图集每个战斗状态的固定帧数。</summary>
+    private static int BattleFrameCount(CharacterAnimationState state)
     {
-        Rect2 region = slot switch
+        return state switch
         {
-            CharacterArtSlot.Portrait => PortraitSheetRegion,
-            CharacterArtSlot.Map => BuildMapSheetRegion(CharacterAnimationState.Idle, CharacterFacing.Down, 0),
-            CharacterArtSlot.Battle => BuildBattleSheetRegion(CharacterAnimationState.Idle, 0),
-            _ => PortraitSheetRegion
+            CharacterAnimationState.Idle => 2,
+            CharacterAnimationState.Attack => 4,
+            CharacterAnimationState.Cast => 4,
+            CharacterAnimationState.Hit => 2,
+            CharacterAnimationState.Dodge => 2,
+            CharacterAnimationState.Defeat => 3,
+            _ => 0
         };
-
-        return TryLoadSheetRegion(key, $"slot:{slot}", region);
     }
 
-    /// <summary>从图集切出一张地图方向帧；只有 Idle 与 Walk 使用地图区域。</summary>
-    private static Texture2D? TryLoadMapSheetFrame(
-        string key,
-        CharacterAnimationState state,
-        CharacterFacing facing,
-        int frameIndex)
+    /// <summary>计算地图图集中的整数切片区域。</summary>
+    private static Rect2 BuildMapRegion(CharacterAnimationState state, CharacterFacing facing, int frameIndex)
     {
-        int frameCount = MapSheetFrameCount(state);
-        if (frameCount <= 0 || !HasValidSheet(key))
-        {
-            return null;
-        }
-
-        int safeIndex = Math.Clamp(frameIndex, 0, frameCount - 1);
-        Rect2 region = BuildMapSheetRegion(state, facing, safeIndex);
-        return TryLoadSheetRegion(key, $"map:{state}:{facing}:{safeIndex}", region);
+        int stateRow = state == CharacterAnimationState.Walk ? 4 : 0;
+        int row = stateRow + (int)facing;
+        return new Rect2(frameIndex * MapCell, MapOriginY + row * MapCell, MapCell, MapCell);
     }
 
-    /// <summary>从图集切出一张战斗动作帧。</summary>
-    private static Texture2D? TryLoadBattleSheetFrame(
-        string key,
-        CharacterAnimationState state,
-        int frameIndex)
+    /// <summary>计算战斗图集中的整数切片区域。</summary>
+    private static Rect2 BuildBattleRegion(CharacterAnimationState state, int frameIndex)
     {
-        int frameCount = BattleSheetFrameCount(state);
-        if (frameCount <= 0 || !HasValidSheet(key))
+        int row = state switch
         {
-            return null;
-        }
-
-        int safeIndex = Math.Clamp(frameIndex, 0, frameCount - 1);
-        Rect2 region = BuildBattleSheetRegion(state, safeIndex);
-        return TryLoadSheetRegion(key, $"battle:{state}:{safeIndex}", region);
+            CharacterAnimationState.Idle => 0,
+            CharacterAnimationState.Attack => 1,
+            CharacterAnimationState.Cast => 2,
+            CharacterAnimationState.Hit => 3,
+            CharacterAnimationState.Dodge => 4,
+            CharacterAnimationState.Defeat => 5,
+            _ => 0
+        };
+        return new Rect2(BattleOriginX + frameIndex * BattleCell, row * BattleCell, BattleCell, BattleCell);
     }
 
-    /// <summary>
-    /// 创建一个只显示图集指定区域的 AtlasTexture，并把切片结果写入缓存。
-    /// 所有区域都是整数坐标，不会发生纹理插值或边缘串色。
-    /// </summary>
+    /// <summary>从 sheet.svg 创建 AtlasTexture；所有区域都使用整数坐标。</summary>
     private static Texture2D? TryLoadSheetRegion(string key, string regionKey, Rect2 region)
     {
         string cacheKey = $"sheet-region:{key}:{regionKey}";
@@ -265,115 +255,44 @@ public static class CharacterAssetResolver
             return null;
         }
 
-        AtlasTexture atlasTexture = new()
+        AtlasTexture atlas = new()
         {
             Atlas = sheet,
             Region = region
         };
-        TextureCache[cacheKey] = atlasTexture;
-        return atlasTexture;
+        TextureCache[cacheKey] = atlas;
+        return atlas;
     }
 
-    /// <summary>统一图集存在且尺寸符合 512×576 时才启用切片，防止错误素材被越界读取。</summary>
+    /// <summary>尺寸严格匹配生产规格时才允许切片，防止错误图集越界。</summary>
     private static bool HasValidSheet(string key)
     {
         Texture2D? sheet = TryLoadPath(BuildSheetPath(key));
         return sheet is not null && sheet.GetWidth() == SheetWidth && sheet.GetHeight() == SheetHeight;
     }
 
-    /// <summary>统一地图图集只有待机和行走两种状态。</summary>
-    private static int MapSheetFrameCount(CharacterAnimationState state)
-    {
-        return state switch
-        {
-            CharacterAnimationState.Idle => 2,
-            CharacterAnimationState.Walk => 3,
-            _ => 0
-        };
-    }
-
-    /// <summary>统一战斗图集每个状态的固定帧数。</summary>
-    private static int BattleSheetFrameCount(CharacterAnimationState state)
-    {
-        return state switch
-        {
-            CharacterAnimationState.Idle => 2,
-            CharacterAnimationState.Attack => 4,
-            CharacterAnimationState.Cast => 4,
-            CharacterAnimationState.Hit => 2,
-            CharacterAnimationState.Dodge => 2,
-            CharacterAnimationState.Defeat => 3,
-            _ => 0
-        };
-    }
-
-    /// <summary>根据地图状态、方向和帧号计算 32×32 图集区域。</summary>
-    private static Rect2 BuildMapSheetRegion(
-        CharacterAnimationState state,
-        CharacterFacing facing,
-        int frameIndex)
-    {
-        int stateRow = state == CharacterAnimationState.Walk ? 4 : 0;
-        int row = stateRow + (int)facing;
-        return new Rect2(
-            frameIndex * MapSheetCellSize,
-            MapSheetOriginY + row * MapSheetCellSize,
-            MapSheetCellSize,
-            MapSheetCellSize);
-    }
-
-    /// <summary>根据战斗状态和帧号计算 96×96 图集区域。</summary>
-    private static Rect2 BuildBattleSheetRegion(CharacterAnimationState state, int frameIndex)
-    {
-        int row = state switch
-        {
-            CharacterAnimationState.Idle => 0,
-            CharacterAnimationState.Attack => 1,
-            CharacterAnimationState.Cast => 2,
-            CharacterAnimationState.Hit => 3,
-            CharacterAnimationState.Dodge => 4,
-            CharacterAnimationState.Defeat => 5,
-            _ => 0
-        };
-
-        return new Rect2(
-            BattleSheetOriginX + frameIndex * BattleSheetCellSize,
-            row * BattleSheetCellSize,
-            BattleSheetCellSize,
-            BattleSheetCellSize);
-    }
-
-    /// <summary>
-    /// 扫描一组从 0 开始连续编号的旧独立帧，最多允许 24 帧。
-    /// 设定上限可避免错误目录造成无界资源检查。
-    /// </summary>
+    /// <summary>扫描旧连续帧，最多读取 24 张，避免错误目录造成无界检查。</summary>
     private static int CountContinuousFrames(Func<int, string> pathFactory)
     {
         int count = 0;
-        for (int frameIndex = 0; frameIndex < 24; frameIndex++)
+        for (int index = 0; index < 24; index++)
         {
-            if (!ResourceLoader.Exists(pathFactory(frameIndex)))
+            if (!ResourceLoader.Exists(pathFactory(index)))
             {
                 break;
             }
-
             count++;
         }
-
         return count;
     }
 
-    /// <summary>
-    /// 从指定 res:// 路径加载纹理并写入缓存。
-    /// 正式素材尚未加入时不输出错误日志，让程序自然回退到占位表现。
-    /// </summary>
+    /// <summary>加载并缓存一个 Godot 纹理资源；不存在时静默返回 null。</summary>
     private static Texture2D? TryLoadPath(string path)
     {
         if (TextureCache.TryGetValue(path, out Texture2D? cached))
         {
             return cached;
         }
-
         if (!ResourceLoader.Exists(path))
         {
             return null;
@@ -384,12 +303,11 @@ public static class CharacterAssetResolver
         {
             return null;
         }
-
         TextureCache[path] = texture;
         return texture;
     }
 
-    /// <summary>生成可能对应当前人物的素材目录键。</summary>
+    /// <summary>人物专属素材优先，其次职业素材，最后才使用阵营通用素材。</summary>
     private static IEnumerable<string> CandidateKeys(UnitModel unit)
     {
         yield return NormalizeKey(unit.Id);
@@ -397,8 +315,8 @@ public static class CharacterAssetResolver
         yield return unit.Team == UnitTeam.Enemy ? "enemy_default" : "player_default";
     }
 
-    /// <summary>按统一目录约定构造旧单张人物资源路径。</summary>
-    private static string BuildPath(string key, CharacterArtSlot slot)
+    /// <summary>旧单图路径继续保留，方便未来直接覆盖某一个槽位。</summary>
+    private static string BuildLegacyPath(string key, CharacterArtSlot slot)
     {
         string fileName = slot switch
         {
@@ -407,36 +325,32 @@ public static class CharacterAssetResolver
             CharacterArtSlot.Battle => "battle.png",
             _ => "portrait.png"
         };
-
         return $"res://assets/characters/{key}/{fileName}";
     }
 
-    /// <summary>构造新统一角色图集路径。</summary>
+    /// <summary>新正式角色图集使用可文本提交的 SVG 容器。</summary>
     private static string BuildSheetPath(string key)
     {
-        return $"res://assets/characters/{key}/sheet.png";
+        return $"res://assets/characters/{key}/sheet.svg";
     }
 
-    /// <summary>构造旧地图方向序列帧路径。</summary>
-    private static string BuildMapFramePath(
+    /// <summary>旧地图多帧路径。</summary>
+    private static string BuildLegacyMapFramePath(
         string key,
         CharacterAnimationState state,
         CharacterFacing facing,
         int frameIndex)
     {
-        string stateName = state.ToString().ToLowerInvariant();
-        string facingName = facing.ToString().ToLowerInvariant();
-        return $"res://assets/characters/{key}/map/{stateName}_{facingName}_{frameIndex}.png";
+        return $"res://assets/characters/{key}/map/{state.ToString().ToLowerInvariant()}_{facing.ToString().ToLowerInvariant()}_{frameIndex}.png";
     }
 
-    /// <summary>构造旧独立战斗演出序列帧路径。</summary>
-    private static string BuildBattleFramePath(string key, CharacterAnimationState state, int frameIndex)
+    /// <summary>旧战斗多帧路径。</summary>
+    private static string BuildLegacyBattleFramePath(string key, CharacterAnimationState state, int frameIndex)
     {
-        string stateName = state.ToString().ToLowerInvariant();
-        return $"res://assets/characters/{key}/battle/{stateName}_{frameIndex}.png";
+        return $"res://assets/characters/{key}/battle/{state.ToString().ToLowerInvariant()}_{frameIndex}.png";
     }
 
-    /// <summary>把运行时 ID 转成稳定安全的目录名。</summary>
+    /// <summary>把运行时 ID 统一成稳定目录键。</summary>
     private static string NormalizeKey(string value)
     {
         return value.Trim().ToLowerInvariant().Replace(' ', '_');
