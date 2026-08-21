@@ -7,7 +7,7 @@ namespace FlameEmblem.Main;
 
 /// <summary>
 /// 为当前战斗章节提供本地“保存进度 / 读取进度”入口。
-/// 章节 ID 来自 CampaignState，因此序章和后续世界地图战斗共用同一套存档逻辑，不再写死 chapter_01。
+/// v2 存档同时保存单场战斗与世界地图战役状态，并支持从当前章节自动跳转到存档所在章节后继续。
 /// </summary>
 public partial class SaveGameCoordinator : Node
 {
@@ -68,7 +68,7 @@ public partial class SaveGameCoordinator : Node
     /// <summary>缓存主场景接口并等待 MainGame 动态 HUD 创建完成。</summary>
     public override void _Ready()
     {
-        // 排在转职协调器之后，保证右侧顺序保持“批量指令 -> 转职 -> 存档”。
+        // ChapterFlowCoordinator 使用 -500 优先级先准备正确章节；这里随后才能安全套用跨场景待恢复战斗快照。
         ProcessPriority = 320;
         _battleHost = GetParent();
         _visualCoordinator = GetNodeOrNull<CharacterVisualCoordinator>("../CharacterVisualCoordinator");
@@ -119,7 +119,7 @@ public partial class SaveGameCoordinator : Node
         }
     }
 
-    /// <summary>等待右侧 HUD 完成创建，并持续刷新保存/读取按钮状态。</summary>
+    /// <summary>等待右侧 HUD 完成创建，处理跨场景待恢复存档，并持续刷新保存/读取按钮状态。</summary>
     public override void _Process(double delta)
     {
         if (!_uiInitialized)
@@ -127,6 +127,7 @@ public partial class SaveGameCoordinator : Node
             _uiInitialized = TryCreateButtons();
         }
 
+        TryApplyPendingSceneRestore();
         RefreshButtonStates();
     }
 
@@ -179,7 +180,8 @@ public partial class SaveGameCoordinator : Node
         bool playerPhase = IsPlayerPhase();
         bool busy = BattleAnimationBus.IsPlaybackActive ||
                     (_visualCoordinator?.IsMovementAnimating ?? false) ||
-                    IsGroupAttackActive();
+                    IsGroupAttackActive() ||
+                    SaveGameService.HasPendingSceneRestore;
         bool hasSelection = _battleHost is not null && _selectedUnitField?.GetValue(_battleHost) is UnitModel;
 
         // 保存必须位于完整单位行动边界，避免保存“已经移动但还没攻击/待机”的半行动状态。
@@ -188,7 +190,7 @@ public partial class SaveGameCoordinator : Node
         _loadButton.Text = SaveGameService.HasSave ? "读取进度" : "读取进度（无存档）";
     }
 
-    /// <summary>把当前章节完整运行时状态写入本地单槽位。</summary>
+    /// <summary>把当前章节完整运行时状态和世界地图战役状态写入本地单槽位。</summary>
     private void SaveCurrentProgress()
     {
         if (!CanOperate(requireActionBoundary: true, out string reason))
@@ -197,19 +199,28 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
+        IReadOnlyList<UnitModel> units = ReadUnits();
+        // 存档瞬间同步一次长期队伍，确保本回合刚获得的 EXP、转职和受伤状态也进入战役快照。
+        CampaignState.CapturePlayerRoster(units);
+
         SaveGameData data = new()
         {
             ChapterId = CampaignState.CurrentChapterId,
+            ChapterPath = CampaignState.CurrentChapterPath,
             Round = ReadRound(),
             LastBattleLog = ReadLastBattleLog(),
-            Units = ReadUnits().Select(CreateSnapshot).ToList()
+            Units = units.Select(CreateSnapshot).ToList(),
+            Campaign = CampaignState.CreateSaveSnapshot()
         };
 
         SaveGameService.TrySave(data, out string message);
         ShowMessage(message);
     }
 
-    /// <summary>读取本地单槽位，并在完整验证通过后一次性恢复全部单位。</summary>
+    /// <summary>
+    /// 读取本地单槽位。
+    /// 同章节直接恢复；不同章节先恢复战役快照并切换场景，再由新场景自动消费待恢复战斗快照。
+    /// </summary>
     private void LoadCurrentProgress()
     {
         if (!CanOperate(requireActionBoundary: false, out string reason))
@@ -226,15 +237,63 @@ public partial class SaveGameCoordinator : Node
 
         if (!data.ChapterId.Equals(CampaignState.CurrentChapterId, StringComparison.OrdinalIgnoreCase))
         {
-            ShowMessage($"槽位 1 保存的是 {data.ChapterId}，当前正在进行 {CampaignState.CurrentChapterId}，请从对应世界地图节点进入后再读取。");
+            CampaignState.RestoreSaveSnapshot(data.Campaign, data.ChapterId, data.ChapterPath);
+            CampaignState.BeginChapter(data.ChapterId, data.ChapterPath);
+            SaveGameService.QueuePendingSceneRestore(data);
+            ShowMessage($"正在切换到存档章节 {data.ChapterId}……");
+
+            Error error = GetTree().ChangeSceneToFile("res://scenes/main/Main.tscn");
+            if (error != Error.Ok)
+            {
+                // 场景切换失败时消费待恢复对象，避免下一次进入战斗意外自动读档。
+                SaveGameService.TakePendingSceneRestore();
+                ShowMessage($"无法切换到存档章节：{error}。");
+            }
+
             return;
         }
 
+        ApplyLoadedData(data);
+    }
+
+    /// <summary>
+    /// 场景切换后自动套用之前暂存的战斗快照。
+    /// ChapterFlowCoordinator 已经更早把 MainGame 替换成正确章节，因此这里可以做完整单位集合校验。
+    /// </summary>
+    private void TryApplyPendingSceneRestore()
+    {
+        if (!SaveGameService.HasPendingSceneRestore)
+        {
+            return;
+        }
+
+        SaveGameData? data = SaveGameService.TakePendingSceneRestore();
+        if (data is null)
+        {
+            return;
+        }
+
+        if (!data.ChapterId.Equals(CampaignState.CurrentChapterId, StringComparison.OrdinalIgnoreCase))
+        {
+            // 理论上不应发生；重新排队让下一帧/正确场景继续处理，而不是丢掉快照。
+            SaveGameService.QueuePendingSceneRestore(data);
+            return;
+        }
+
+        ApplyLoadedData(data);
+    }
+
+    /// <summary>验证并一次性恢复一份已经解析完成的存档。</summary>
+    private void ApplyLoadedData(SaveGameData data)
+    {
         if (!TryValidateSave(data, out List<ValidatedRestore> restores, out string validationMessage))
         {
             ShowMessage(validationMessage);
             return;
         }
+
+        CampaignState.RestoreSaveSnapshot(data.Campaign, data.ChapterId, data.ChapterPath);
+        CampaignState.BeginChapter(data.ChapterId, data.ChapterPath);
 
         foreach (ValidatedRestore restore in restores)
         {
@@ -267,7 +326,7 @@ public partial class SaveGameCoordinator : Node
             _clearSelectionMethod?.Invoke(_battleHost, null);
         }
 
-        // 读档后的角色状态也成为当前战役队伍状态，之后返回世界地图再进章节不会丢失读档结果。
+        // 精确战斗快照恢复后再次覆盖长期队伍，使 v1 旧存档即使没有 Campaign.PlayerRoster 也能自动迁移出长期角色状态。
         CampaignState.CapturePlayerRoster(ReadUnits());
         SnapMapCharactersToLogicalPositions();
         ShowMessage($"已读取槽位 1：{CampaignState.CurrentChapterId}，第 {Math.Max(1, data.Round)} 回合继续。");
@@ -278,7 +337,7 @@ public partial class SaveGameCoordinator : Node
         }
     }
 
-    /// <summary>把一个运行时单位转换为纯数据存档快照。</summary>
+    /// <summary>把一个运行时单位转换为纯数据单场战斗快照。</summary>
     private static UnitSaveData CreateSnapshot(UnitModel unit)
     {
         return new UnitSaveData
