@@ -10,15 +10,30 @@ namespace FlameEmblem.Visual;
 public static class CharacterAppearanceCatalog
 {
     /// <summary>
-    /// 根据角色实例 ID 和职业返回当前使用的外观。
-    /// 玩家角色优先使用个人外观，通用敌军则按职业复用外观。
+    /// 根据角色实例 ID 和当前职业返回程序回退外观。
+    /// 玩家角色优先使用个人外观，并在晋升后切换更高阶轮廓；通用敌军则按职业复用外观。
     /// </summary>
     public static CharacterAppearanceDefinition Get(UnitModel unit)
     {
         string id = unit.Id.ToLowerInvariant();
+        string classId = unit.ClassDefinition.Id.ToLowerInvariant();
+
         if (id == "adrian")
         {
-            // 主角保持蓝灰轻甲，但提高中间色亮度，让棕发、披风与金属边在亮战场上仍然分层清楚。
+            if (classId == "sword_lord")
+            {
+                // 晋升后增加明亮钢蓝甲片和更强金色饰边，身体轮廓从轻装升级为披风重甲剑士。
+                return new CharacterAppearanceDefinition(
+                    new Color("684630"),
+                    new Color("647fa8"),
+                    new Color("e0bd69"),
+                    new Color("e8b78f"),
+                    true,
+                    CharacterWeaponSilhouette.Sword,
+                    CharacterBodySilhouette.Armored);
+            }
+
+            // 主角基础职业保持蓝灰轻甲，让棕发、披风与金属边在亮战场上分层清楚。
             return new CharacterAppearanceDefinition(
                 new Color("684630"),
                 new Color("486a98"),
@@ -31,7 +46,20 @@ public static class CharacterAppearanceCatalog
 
         if (id == "celine")
         {
-            // 弓手使用更柔和的橙棕发与偏灰森林绿，减少原先过暗导致弓和身体粘在一起的问题。
+            if (classId == "bow_knight")
+            {
+                // 晋升弓骑士使用更深的森林绿和金属肩甲色，保留弓手纤细轮廓但提高高级职业辨识度。
+                return new CharacterAppearanceDefinition(
+                    new Color("b97b48"),
+                    new Color("66826d"),
+                    new Color("e4c878"),
+                    new Color("efc09b"),
+                    true,
+                    CharacterWeaponSilhouette.Bow,
+                    CharacterBodySilhouette.Light);
+            }
+
+            // 弓手使用柔和橙棕发与偏灰森林绿，避免弓和身体粘在一起。
             return new CharacterAppearanceDefinition(
                 new Color("b97b48"),
                 new Color("557b62"),
@@ -44,7 +72,20 @@ public static class CharacterAppearanceCatalog
 
         if (id == "rowan")
         {
-            // 重甲提升钢蓝主体亮度，保留暗红识别色，让肩甲、胸甲和枪杆更容易从背景中分离。
+            if (classId == "royal_lancer")
+            {
+                // 晋升枪卫强化亮钢蓝胸甲和金色披风扣，使重甲层次明显高于基础士兵。
+                return new CharacterAppearanceDefinition(
+                    new Color("443832"),
+                    new Color("8a98a8"),
+                    new Color("c69a58"),
+                    new Color("d9a982"),
+                    true,
+                    CharacterWeaponSilhouette.Spear,
+                    CharacterBodySilhouette.Armored);
+            }
+
+            // 基础重甲使用钢蓝主体和暗红识别色。
             return new CharacterAppearanceDefinition(
                 new Color("443832"),
                 new Color("788493"),
@@ -57,7 +98,20 @@ public static class CharacterAppearanceCatalog
 
         if (id == "mira")
         {
-            // 法师的紫色改成稍亮的灰紫层级，强调色更柔和，避免袍摆在深色背景中变成一个大色块。
+            if (classId == "sage")
+            {
+                // 贤者使用更明亮的灰紫长袍与金紫饰边，让施法者晋升后在地图和战斗画面都能立即看出变化。
+                return new CharacterAppearanceDefinition(
+                    new Color("80608a"),
+                    new Color("706aa0"),
+                    new Color("e0b56c"),
+                    new Color("edbf9a"),
+                    true,
+                    CharacterWeaponSilhouette.Tome,
+                    CharacterBodySilhouette.Robed);
+            }
+
+            // 基础法师使用偏灰紫色，保持长袍和头发层次。
             return new CharacterAppearanceDefinition(
                 new Color("76527c"),
                 new Color("5c5789"),
@@ -69,7 +123,7 @@ public static class CharacterAppearanceCatalog
         }
 
         // 通用敌军继续比玩家整体更暗，保证战斗中双方阵营可以只看轮廓和明度就快速区分。
-        return unit.ClassDefinition.Id.ToLowerInvariant() switch
+        return classId switch
         {
             "guard" => new CharacterAppearanceDefinition(
                 new Color("403833"),
