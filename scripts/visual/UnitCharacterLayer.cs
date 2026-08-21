@@ -59,6 +59,15 @@ public partial class UnitCharacterLayer : Node2D
     private const float PixelScale = 2.0f;
 
     /// <summary>
+    /// 正式地图人物允许占用的最大整数像素边长。
+    /// 32×32 原图保持 1× 原生尺寸，24×24/16×16 等更小素材最多使用 2×，绝不拉成非整数比例。
+    /// </summary>
+    private const int FormalMapMaxFootprint = 48;
+
+    /// <summary>正式地图人物脚底相对格子中心的像素偏移。</summary>
+    private const float FormalMapFeetOffsetY = 20.0f;
+
+    /// <summary>
     /// 节点进入场景后使用最近邻纹理过滤。
     /// 低分辨率人物帧被放大时保持清晰像素边缘，不使用线性平滑。
     /// </summary>
@@ -157,7 +166,8 @@ public partial class UnitCharacterLayer : Node2D
     /// </summary>
     private void DrawUnit(UnitModel unit)
     {
-        Vector2 visualCenter = ResolveVisualCenter(unit);
+        // 地图人物中心最终锁到整数屏幕像素，最近邻纹理在移动期间不会因为半像素采样产生发虚边缘。
+        Vector2 visualCenter = RoundVector(ResolveVisualCenter(unit));
         bool moving = _motions.ContainsKey(unit.Id);
         CharacterFacing facing = ResolveFacing(unit);
         CharacterAnimationState animationState = moving
@@ -166,7 +176,7 @@ public partial class UnitCharacterLayer : Node2D
 
         Texture2D? animationFrame = ResolveAnimationFrame(unit, animationState, facing);
         Vector2 fallbackOffset = animationFrame is null ? AnimationOffset(unit) : Vector2.Zero;
-        Vector2 characterCenter = visualCenter + fallbackOffset;
+        Vector2 characterCenter = RoundVector(visualCenter + fallbackOffset);
 
         Color teamColor = unit.Team == UnitTeam.Player
             ? new Color(0.20f, 0.52f, 1.0f)
@@ -271,7 +281,7 @@ public partial class UnitCharacterLayer : Node2D
 
     /// <summary>
     /// 返回单位当前用于绘制的像素中心。
-    /// 移动中在当前路径段起终点之间做平滑插值；静止时直接使用逻辑格中心。
+    /// 移动中在当前路径段起终点之间做平滑插值；DrawUnit 最终会锁到整数屏幕像素，兼顾流畅移动与像素清晰度。
     /// </summary>
     private Vector2 ResolveVisualCenter(UnitModel unit)
     {
@@ -288,8 +298,8 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
-    /// 根据地形移动消耗与当前其他单位阻挡，重建起点到目标格的最短合法路径。
-    /// 如果表现层无法重建路径，则使用起点到终点直达作为安全回退，不阻断逻辑层。
+    /// 根据地形移动消耗与单位阵营阻挡重建起点到目标格的最短合法路径。
+    /// 同阵营单位允许作为中间路径经过但不能作为最终落脚格；敌军仍然完全阻挡。
     /// </summary>
     private List<Vector2I> BuildVisualPath(UnitModel movingUnit, Vector2I start, Vector2I destination)
     {
@@ -303,8 +313,11 @@ public partial class UnitCharacterLayer : Node2D
         PriorityQueue<Vector2I, int> frontier = new();
         frontier.Enqueue(start, 0);
 
-        HashSet<Vector2I> occupied = Units
-            .Where(unit => unit.IsAlive && !ReferenceEquals(unit, movingUnit))
+        // 视觉路径必须与逻辑规则一致：友军可以穿过，只有敌对存活单位会完全封锁格子。
+        HashSet<Vector2I> enemyBlockedCells = Units
+            .Where(unit => unit.IsAlive &&
+                           !ReferenceEquals(unit, movingUnit) &&
+                           unit.Team != movingUnit.Team)
             .Select(unit => unit.GridPosition)
             .ToHashSet();
 
@@ -323,7 +336,7 @@ public partial class UnitCharacterLayer : Node2D
             foreach (Vector2I direction in CardinalDirections())
             {
                 Vector2I next = current + direction;
-                if (!IsInsideBoard(next) || (occupied.Contains(next) && next != destination))
+                if (!IsInsideBoard(next) || enemyBlockedCells.Contains(next))
                 {
                     continue;
                 }
@@ -364,17 +377,29 @@ public partial class UnitCharacterLayer : Node2D
     }
 
     /// <summary>
-    /// 绘制地图人物纹理。
-    /// 纹理使用最近邻过滤并缩放到单格范围，保持像素边缘清晰。
+    /// 绘制正式地图人物纹理。
+    /// 保持源图宽高比例，只使用整数倍率，并把脚底统一对齐到格子中心下方固定基准线。
     /// </summary>
     private void DrawMapTexture(UnitModel unit, Texture2D texture, Vector2 center)
     {
-        Rect2 target = new(center + new Vector2(-23, -29), new Vector2(46, 54));
+        int sourceWidth = Math.Max(1, texture.GetWidth());
+        int sourceHeight = Math.Max(1, texture.GetHeight());
+        int largestSide = Math.Max(sourceWidth, sourceHeight);
+
+        // 32×32 正式帧保持 1× 原生像素；更小的 16/24px 旧素材最多 2×，避免出现 1.4375× 一类模糊缩放。
+        int integerScale = Math.Clamp(FormalMapMaxFootprint / largestSide, 1, 2);
+        int targetWidth = sourceWidth * integerScale;
+        int targetHeight = sourceHeight * integerScale;
+        float targetX = Mathf.Round(center.X - targetWidth / 2.0f);
+        float feetY = Mathf.Round(center.Y + FormalMapFeetOffsetY);
+        float targetY = feetY - targetHeight;
+        Rect2 target = new(new Vector2(targetX, targetY), new Vector2(targetWidth, targetHeight));
+
         DrawTextureRect(texture, target, false);
 
         if (unit.HasActed)
         {
-            DrawRect(target, new Color(0.04f, 0.05f, 0.07f, 0.38f), true);
+            DrawRect(target, new Color(0.04f, 0.05f, 0.07f, 0.34f), true);
         }
     }
 
@@ -389,7 +414,8 @@ public partial class UnitCharacterLayer : Node2D
         bool moving)
     {
         CharacterAppearanceDefinition appearance = CharacterAppearanceCatalog.Get(unit);
-        Vector2 origin = center + new Vector2(-16, -20);
+        // 程序人物原点锁到 2px 网格，使所有逻辑像素块在移动时仍保持同一像素相位。
+        Vector2 origin = SnapToGrid(center + new Vector2(-16, -20), PixelScale);
         bool alternateStep = moving && ((int)Math.Floor(_elapsed * 10.0) % 2 == 1);
 
         Color outline = new(0.08f, 0.07f, 0.08f);
@@ -406,23 +432,23 @@ public partial class UnitCharacterLayer : Node2D
 
         DrawPixelBody(origin, appearance, alternateStep, outline, shadow, highlight, darkMetal);
 
-        // 头部只用矩形像素，不使用圆形；不同朝向通过脸部亮区和头发位置表现。
-        DrawPixelBlock(origin, 5, 2, 6, 6, outline);
-        DrawPixelBlock(origin, 6, 3, 4, 4, appearance.SkinColor);
-        DrawPixelBlock(origin, 5, 2, 6, 2, appearance.HairColor);
-        DrawPixelBlock(origin, 5, 4, 2, 3, appearance.HairColor.Darkened(0.08f));
+        // 头部缩小一档，让地图小人从大头模板转向更修长的古典战棋比例。
+        DrawPixelBlock(origin, 6, 2, 5, 5, outline);
+        DrawPixelBlock(origin, 7, 3, 3, 3, appearance.SkinColor);
+        DrawPixelBlock(origin, 6, 2, 5, 2, appearance.HairColor);
+        DrawPixelBlock(origin, 6, 4, 1, 3, appearance.HairColor.Darkened(0.08f));
 
         if (facing == CharacterFacing.Up)
         {
-            DrawPixelBlock(origin, 7, 4, 3, 3, appearance.HairColor);
+            DrawPixelBlock(origin, 8, 4, 3, 3, appearance.HairColor);
         }
         else
         {
             int eyeX = facing switch
             {
-                CharacterFacing.Left => 6,
+                CharacterFacing.Left => 7,
                 CharacterFacing.Right => 9,
-                _ => 7
+                _ => 8
             };
             DrawPixelBlock(origin, eyeX, 5, 1, 1, outline);
         }
@@ -595,6 +621,20 @@ public partial class UnitCharacterLayer : Node2D
         }
 
         return Vector2.Zero;
+    }
+
+    /// <summary>把任意位置四舍五入到整数屏幕像素。</summary>
+    private static Vector2 RoundVector(Vector2 value)
+    {
+        return new Vector2(Mathf.Round(value.X), Mathf.Round(value.Y));
+    }
+
+    /// <summary>把程序人物原点锁到指定逻辑像素网格。</summary>
+    private static Vector2 SnapToGrid(Vector2 value, float gridSize)
+    {
+        return new Vector2(
+            Mathf.Round(value.X / gridSize) * gridSize,
+            Mathf.Round(value.Y / gridSize) * gridSize);
     }
 
     /// <summary>获取指定格地形；未配置的格子默认是平地。</summary>
