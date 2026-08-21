@@ -121,6 +121,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             leftCharacter.Position = new Vector2(48, 48);
             leftCharacter.Scale = Vector2.One;
             leftCharacter.Modulate = new Color(1.04f, 1.04f, 1.02f, 1.0f);
+            AttachDetailOverlay(leftCharacter, "LeftCharacterDetailOverlay");
         }
 
         if (_rightCharacterField?.GetValue(_battleCoordinator) is AnimatedBattleCharacterControl rightCharacter)
@@ -128,6 +129,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             rightCharacter.Position = new Vector2(632, 48);
             rightCharacter.Scale = Vector2.One;
             rightCharacter.Modulate = new Color(1.04f, 1.04f, 1.02f, 1.0f);
+            AttachDetailOverlay(rightCharacter, "RightCharacterDetailOverlay");
         }
 
         // 中央结果文字改成亮米黄色并增强阴影，在亮背景上也能保持清晰。
@@ -141,5 +143,27 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 给一个程序战斗人物挂载细节叠加层。
+    /// 叠加层会自行检测正式 PNG；正式素材存在时不会绘制任何程序细节。
+    /// </summary>
+    private static void AttachDetailOverlay(AnimatedBattleCharacterControl character, string overlayName)
+    {
+        if (character.GetChildren().OfType<BattleCharacterDetailOverlayControl>().Any())
+        {
+            return;
+        }
+
+        BattleCharacterDetailOverlayControl overlay = new()
+        {
+            Name = overlayName,
+            Position = Vector2.Zero,
+            Size = character.Size,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        character.AddChild(overlay);
+        overlay.Bind(character);
     }
 }
