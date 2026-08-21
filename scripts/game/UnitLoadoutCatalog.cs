@@ -55,6 +55,23 @@ public static class UnitLoadoutCatalog
     }
 
     /// <summary>
+    /// 按稳定武器 ID 返回完整定义。
+    /// 存档只写武器 ID，读取时必须重新引用当前 data/weapons.json 的规则数据，不能信任存档自带的战斗参数。
+    /// </summary>
+    public static WeaponDefinition? TryGetWeapon(string weaponId)
+    {
+        EnsureLoaded();
+        if (_weapons is null || string.IsNullOrWhiteSpace(weaponId))
+        {
+            return null;
+        }
+
+        return _weapons.TryGetValue(weaponId, out WeaponDefinition? weapon)
+            ? weapon
+            : null;
+    }
+
+    /// <summary>
     /// 把单位切换到 loadout 中的下一件装备，并返回切换后的装备。
     /// </summary>
     public static WeaponDefinition CycleNext(UnitModel unit)
