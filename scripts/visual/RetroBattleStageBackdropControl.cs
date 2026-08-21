@@ -50,26 +50,27 @@ public partial class RetroBattleStageBackdropControl : Control
         DrawRect(new Rect2(826, 58, 56, 14), cloud, true);
     }
 
-    /// <summary>用阶梯多边形绘制两层远山，保持老式战棋横向舞台的层次感。</summary>
+    /// <summary>用硬边多边形绘制两层远山，保持老式战棋横向舞台的层次感。</summary>
     private void DrawMountains()
     {
-        PackedVector2Array farMountain = new(new[]
+        // Godot C# 的绘图 API 直接使用 Vector2[]，避免不同版本对 PackedVector2Array 包装类型存在差异。
+        Vector2[] farMountain =
         {
-            new Vector2(0, 208), new Vector2(0, 178), new Vector2(84, 126),
-            new Vector2(164, 176), new Vector2(260, 110), new Vector2(348, 180),
-            new Vector2(444, 132), new Vector2(548, 190), new Vector2(650, 118),
-            new Vector2(748, 176), new Vector2(846, 128), new Vector2(946, 184),
-            new Vector2(1084, 132), new Vector2(1084, 208)
-        });
+            new(0, 208), new(0, 178), new(84, 126),
+            new(164, 176), new(260, 110), new(348, 180),
+            new(444, 132), new(548, 190), new(650, 118),
+            new(748, 176), new(846, 128), new(946, 184),
+            new(1084, 132), new(1084, 208)
+        };
         DrawColoredPolygon(farMountain, new Color(0.29f, 0.38f, 0.40f));
 
-        PackedVector2Array nearMountain = new(new[]
+        Vector2[] nearMountain =
         {
-            new Vector2(0, 244), new Vector2(0, 206), new Vector2(116, 166),
-            new Vector2(236, 220), new Vector2(364, 164), new Vector2(496, 226),
-            new Vector2(632, 170), new Vector2(768, 218), new Vector2(900, 164),
-            new Vector2(1010, 214), new Vector2(1084, 188), new Vector2(1084, 244)
-        });
+            new(0, 244), new(0, 206), new(116, 166),
+            new(236, 220), new(364, 164), new(496, 226),
+            new(632, 170), new(768, 218), new(900, 164),
+            new(1010, 214), new(1084, 188), new(1084, 244)
+        };
         DrawColoredPolygon(nearMountain, new Color(0.24f, 0.33f, 0.32f));
     }
 
