@@ -4,7 +4,7 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 给标准稿式战斗界面挂载最终程序人物层，并强制所有战斗人物使用整数坐标与最近邻过滤。
+/// 给标准稿式战斗界面挂载最终程序人物层，并强制所有战斗人物与文字使用像素安全参数。
 /// 旧版本会加入蓝灰战场背景；当前版本明确保留纯黑背景，不再插入任何额外舞台图层。
 /// </summary>
 public partial class BattlePresentationPolishCoordinator : Node
@@ -62,7 +62,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
     }
 
-    /// <summary>锁定纯黑背景、整数站位和最近邻人物绘制。</summary>
+    /// <summary>锁定纯黑背景、整数站位、最近邻人物绘制与硬边系统字体。</summary>
     private bool TryApplyPolish()
     {
         if (_battleCoordinator is null ||
@@ -88,6 +88,9 @@ public partial class BattlePresentationPolishCoordinator : Node
         ConfigureBattleCharacter(leftCharacter, new Vector2(100, 4), false, "LeftCinematicBattleFigure");
         ConfigureBattleCharacter(rightCharacter, new Vector2(760, 4), true, "RightCinematicBattleFigure");
 
+        // 战斗 UI 全部使用关闭抗锯齿与次像素定位的共享字体，减少中文和英文在像素框里发虚。
+        ApplyPixelFontRecursive(blocker);
+
         if (_resultLabelField?.GetValue(_battleCoordinator) is Label resultLabel)
         {
             resultLabel.AddThemeColorOverride("font_color", new Color("f3f3ef"));
@@ -98,6 +101,24 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
 
         return true;
+    }
+
+    /// <summary>递归给战斗窗口中的 Label 和 Button 应用同一套硬边系统字体。</summary>
+    private static void ApplyPixelFontRecursive(Node node)
+    {
+        if (node is Label label)
+        {
+            label.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
+        }
+        else if (node is Button button)
+        {
+            button.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
+        }
+
+        foreach (Node child in node.GetChildren())
+        {
+            ApplyPixelFontRecursive(child);
+        }
     }
 
     /// <summary>统一设置单侧战斗人物的像素安全参数，并挂载最终程序人物。</summary>
