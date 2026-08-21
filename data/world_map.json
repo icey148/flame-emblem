@@ -1,0 +1,35 @@
+{
+  "title": "索菲亚东境",
+  "nodes": [
+    {
+      "id": "broken_bridge",
+      "name": "残破石桥",
+      "type": "battle",
+      "chapter_id": "chapter_01",
+      "chapter_path": "res://data/chapter_01.json",
+      "x": 250,
+      "y": 430,
+      "requires_completed": []
+    },
+    {
+      "id": "old_shrine",
+      "name": "旧祠堂",
+      "type": "shrine",
+      "chapter_id": "",
+      "chapter_path": "",
+      "x": 590,
+      "y": 285,
+      "requires_completed": ["chapter_01"]
+    },
+    {
+      "id": "east_road",
+      "name": "东境道路",
+      "type": "future_battle",
+      "chapter_id": "chapter_02",
+      "chapter_path": "res://data/chapter_02.json",
+      "x": 930,
+      "y": 410,
+      "requires_completed": ["chapter_01"]
+    }
+  ]
+}
