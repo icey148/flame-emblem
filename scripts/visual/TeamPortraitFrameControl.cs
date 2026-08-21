@@ -24,7 +24,7 @@ public partial class TeamPortraitFrameControl : Control
             "_unit",
             BindingFlags.Instance | BindingFlags.NonPublic);
         MouseFilter = MouseFilterEnum.Ignore;
-        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         SetProcess(true);
         QueueRedraw();
     }
