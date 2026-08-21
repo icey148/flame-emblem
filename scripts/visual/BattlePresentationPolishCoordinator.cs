@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 给标准稿式战斗界面执行最终构图校正。
-/// 目标不是“接近”参考稿，而是把黑底、人物占比、左右状态框、中央信息框和像素缩放统一到已确认的同一规格。
+/// 所有位置与尺寸统一读取 ReferenceBattleLayout，避免战斗协调器、HUD 和表现层分别写死坐标造成再次漂移。
 /// 本协调器只调整表现节点，不参与战斗结算、目标选择或回合推进。
 /// </summary>
 public partial class BattlePresentationPolishCoordinator : Node
@@ -71,7 +71,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
     }
 
-    /// <summary>把战斗画面锁到已确认参考稿的构图比例与像素安全参数。</summary>
+    /// <summary>把战斗画面锁到已经确认的唯一构图规格与像素安全参数。</summary>
     private bool TryApplyPolish()
     {
         if (_battleCoordinator is null ||
@@ -80,7 +80,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 参考稿背景是纯黑色，不插入任何蓝灰舞台、地形或渐变层。
+        // 正式规格使用纯黑底，不插入蓝灰舞台、地形图层或渐变。
         ColorRect? fullBackdrop = blocker.GetChildren().OfType<ColorRect>().FirstOrDefault();
         if (fullBackdrop is not null)
         {
@@ -94,42 +94,42 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 原程序人物以 4px 为一个逻辑像素；0.75 倍正好得到 3px 整数像素块。
-        // x 使用 .5、y 使用 .25 是对原内部 (18,5) 偏移的补偿，最终像素边缘仍落在整数屏幕像素上。
+        // 程序人物以 4px 为逻辑像素，0.75 倍后正好得到 3px 屏幕像素。
+        // 内部绘制和节点偏移都经过补偿，因此最终边缘仍落在整数屏幕像素上。
         ConfigureBattleCharacter(
             leftCharacter,
-            new Vector2(210.5f, 40.25f),
+            ReferenceBattleLayout.LeftCharacterPosition + new Vector2(0.5f, 0.25f),
             false,
             "LeftCinematicBattleFigure");
         ConfigureBattleCharacter(
             rightCharacter,
-            new Vector2(700.5f, 40.25f),
+            ReferenceBattleLayout.RightCharacterPosition + new Vector2(0.5f, 0.25f),
             true,
             "RightCinematicBattleFigure");
 
-        // 双状态框按参考图比例放在画面下半部：左右各 540px，中间只保留 30px 缝隙。
-        statusHud.Position = new Vector2(85, 305);
-        statusHud.Size = new Vector2(1110, 380);
+        // 双状态框、人物区域和中央信息框全部读取同一份规格。
+        statusHud.Position = ReferenceBattleLayout.StatusHudPosition;
+        statusHud.Size = ReferenceBattleLayout.StatusHudSize;
         statusHud.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
 
-        // 特效只占人物区域，不允许旧效果覆盖到底部状态框。
         if (_effectControlField?.GetValue(_battleCoordinator) is RetroBattleEffectControl effectControl)
         {
             effectControl.Position = Vector2.Zero;
-            effectControl.Size = new Vector2(1280, 305);
+            effectControl.Size = new Vector2(
+                ReferenceBattleLayout.ViewportSize.X,
+                ReferenceBattleLayout.EffectRegionHeight);
             effectControl.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
         }
 
-        // 中央信息框覆盖两边身份区下沿，位置和宽高直接按参考图 1280×720 比例校正。
         if (_resultLabelField?.GetValue(_battleCoordinator) is Label resultLabel)
         {
             if (resultLabel.GetParent() is PanelContainer resultPanel)
             {
-                resultPanel.Position = new Vector2(355, 405);
-                resultPanel.Size = new Vector2(570, 105);
+                resultPanel.Position = ReferenceBattleLayout.ResultPanelPosition;
+                resultPanel.Size = ReferenceBattleLayout.ResultPanelSize;
             }
 
-            resultLabel.CustomMinimumSize = new Vector2(562, 97);
+            resultLabel.CustomMinimumSize = ReferenceBattleLayout.ResultLabelMinimumSize;
             resultLabel.AddThemeColorOverride("font_color", new Color("f3f3ef"));
             resultLabel.AddThemeColorOverride("font_shadow_color", Colors.Black);
             resultLabel.AddThemeConstantOverride("shadow_offset_x", 2);
@@ -137,7 +137,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             resultLabel.AddThemeFontSizeOverride("font_size", 28);
         }
 
-        // 战斗 UI 全部使用关闭抗锯齿与次像素定位的共享字体，减少中文和英文在像素框里发虚。
+        // 战斗窗口文字全部使用关闭抗锯齿与次像素定位的共享字体。
         ApplyPixelFontRecursive(blocker);
         return true;
     }
@@ -168,7 +168,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         string overlayName)
     {
         character.Position = position;
-        character.Size = new Vector2(420, 390);
+        character.Size = ReferenceBattleLayout.CharacterControlSize;
         character.Scale = new Vector2(0.75f, 0.75f);
         character.MirrorHorizontally = mirrored;
         character.Modulate = Colors.White;
@@ -178,7 +178,7 @@ public partial class BattlePresentationPolishCoordinator : Node
 
     /// <summary>
     /// 给现有动画人物挂载三段式程序战斗人物层。
-    /// 正式 battle PNG 或正式状态帧存在时，新层会自动让位；程序人物与正式 96px 素材都会在 0.75 缩放后形成清晰的 3× 像素显示。
+    /// 正式 battle PNG 或正式状态帧存在时本层自动让位；缺素材时才显示原创程序人物。
     /// </summary>
     private static void AttachCinematicFigure(AnimatedBattleCharacterControl character, string overlayName)
     {
