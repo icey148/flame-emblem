@@ -15,6 +15,9 @@ public partial class CharacterPortraitControl : Control
     /// <summary>正式头像与面板边框之间至少保留的像素内边距。</summary>
     private const float FormalPortraitPadding = 4.0f;
 
+    /// <summary>提供给阵营边框和对话层读取的只读人物引用，避免表现层再通过反射访问私有字段。</summary>
+    public UnitModel? DisplayedUnit => _unit;
+
     /// <summary>节点就绪后启用最近邻过滤，保证头像素材和程序像素胸像保持硬边。</summary>
     public override void _Ready()
     {
@@ -32,9 +35,11 @@ public partial class CharacterPortraitControl : Control
     public override void _Draw()
     {
         Rect2 bounds = new(Vector2.Zero, Size);
-        DrawRect(bounds, new Color(0.075f, 0.082f, 0.096f, 0.97f), true);
-        DrawRect(new Rect2(Vector2.Zero, new Vector2(Size.X, 3)), new Color(0.46f, 0.45f, 0.40f), true);
-        DrawRect(new Rect2(new Vector2(0, Size.Y - 3), new Vector2(Size.X, 3)), new Color(0.23f, 0.24f, 0.25f), true);
+
+        // 对话头像使用纯深色底，不再叠旧灰条；阵营色完全交给外层深蓝/粉红边框表达。
+        DrawRect(bounds, new Color("08090c"), true);
+        DrawRect(new Rect2(new Vector2(4, 4), new Vector2(Size.X - 8, 1)), new Color("2a2d34"), true);
+        DrawRect(new Rect2(new Vector2(4, Size.Y - 5), new Vector2(Size.X - 8, 1)), new Color("111318"), true);
 
         if (_unit is null)
         {
@@ -54,7 +59,7 @@ public partial class CharacterPortraitControl : Control
 
     /// <summary>
     /// 以等比整数倍率绘制正式原创头像。
-    /// 64×64 标准头像在小 HUD 中保持 1×，在大详情页中使用完整整数倍，不做横向拉伸。
+    /// 64×64 标准头像在小 HUD 中保持整数倍率，不做横向拉伸或非整数缩放。
     /// </summary>
     private void DrawFormalPortrait(Texture2D texture, Rect2 bounds)
     {
@@ -147,7 +152,7 @@ public partial class CharacterPortraitControl : Control
         DrawPortraitPixel(origin, pixel, 10, 10, 4, 2, skinShadow);
         DrawPortraitPixel(origin, pixel, 11, 12, 2, 1, skinShadow);
 
-        // 眉眼使用更小的单像素信息，鼻梁和嘴部错开，避免左右完全镜像的娃娃脸。
+        // 眉眼、鼻梁和嘴部保持非镜像，避免程序胸像像同一张脸换颜色。
         DrawPortraitPixel(origin, pixel, 10, 6, 2, 1, outline);
         DrawPortraitPixel(origin, pixel, 13, 6, 1, 1, outline);
         DrawPortraitPixel(origin, pixel, 13, 8, 1, 2, skinShadow);
@@ -174,7 +179,7 @@ public partial class CharacterPortraitControl : Control
 
         if (id == "adrian")
         {
-            // Adrian：短而不规则的发束，形成年轻剑士轮廓。
+            // 亚德里安：短而不规则的发束，形成年轻剑士轮廓。
             DrawPortraitPixel(origin, pixel, 7, 1, 3, 3, outline);
             DrawPortraitPixel(origin, pixel, 13, 1, 3, 3, outline);
             DrawPortraitPixel(origin, pixel, 8, 1, 2, 2, hair);
@@ -185,7 +190,7 @@ public partial class CharacterPortraitControl : Control
 
         if (id == "celine")
         {
-            // Celine：侧后长发束和轻薄前发，保持弓手的轻盈感。
+            // 塞琳：侧后长发束和轻薄前发，保持弓手的轻盈感。
             DrawPortraitPixel(origin, pixel, 15, 4, 3, 8, hair);
             DrawPortraitPixel(origin, pixel, 16, 10, 3, 8, shadow);
             DrawPortraitPixel(origin, pixel, 17, 16, 2, 5, hair);
@@ -195,7 +200,7 @@ public partial class CharacterPortraitControl : Control
 
         if (id == "mira")
         {
-            // Mira：两侧长发向肩部下垂，与长袍职业形成纵向节奏。
+            // 米拉：两侧长发向肩部下垂，与长袍职业形成纵向节奏。
             DrawPortraitPixel(origin, pixel, 6, 4, 3, 10, shadow);
             DrawPortraitPixel(origin, pixel, 15, 4, 3, 10, hair);
             DrawPortraitPixel(origin, pixel, 6, 12, 3, 8, shadow);
@@ -206,7 +211,7 @@ public partial class CharacterPortraitControl : Control
 
         if (id == "rowan")
         {
-            // Rowan：短发露出耳侧和颈部，和厚重铠甲形成反差。
+            // 罗文：短发露出耳侧和颈部，和厚重铠甲形成反差。
             DrawPortraitPixel(origin, pixel, 15, 4, 2, 5, shadow);
             DrawPortraitPixel(origin, pixel, 8, 3, 7, 2, hair);
             return;
