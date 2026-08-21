@@ -171,9 +171,10 @@ public partial class WorldMapScreen : Node2D
         {
             Text = $"FLAME EMBLEM   {_map.Title}",
             Position = new Vector2(42, 24),
-            Size = new Vector2(760, 42),
-            ThemeOverrideFontSizes = { FontSize = 26 }
+            Size = new Vector2(760, 42)
         };
+        // Godot 4 使用主题覆盖接口设置字号，避免依赖不存在的对象初始化属性。
+        title.AddThemeFontSizeOverride("font_size", 26);
         AddChild(title);
 
         Label hint = new()
