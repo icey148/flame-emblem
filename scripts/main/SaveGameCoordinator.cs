@@ -7,7 +7,7 @@ namespace FlameEmblem.Main;
 
 /// <summary>
 /// 为当前战斗章节提供本地“保存进度 / 读取进度”入口。
-/// v2 存档同时保存单场战斗与世界地图战役状态，并支持从当前章节自动跳转到存档所在章节后继续。
+/// v3 存档同时记录战斗/世界地图位置；战斗存档可以跨章节精确恢复，世界地图存档则直接返回世界地图。
 /// </summary>
 public partial class SaveGameCoordinator : Node
 {
@@ -205,6 +205,7 @@ public partial class SaveGameCoordinator : Node
 
         SaveGameData data = new()
         {
+            Location = SaveLocation.Battle,
             ChapterId = CampaignState.CurrentChapterId,
             ChapterPath = CampaignState.CurrentChapterPath,
             Round = ReadRound(),
@@ -219,7 +220,7 @@ public partial class SaveGameCoordinator : Node
 
     /// <summary>
     /// 读取本地单槽位。
-    /// 同章节直接恢复；不同章节先恢复战役快照并切换场景，再由新场景自动消费待恢复战斗快照。
+    /// 世界地图存档直接回世界地图；战斗存档同章节直接恢复，不同章节先切换后再精确恢复。
     /// </summary>
     private void LoadCurrentProgress()
     {
@@ -235,9 +236,22 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
+        CampaignState.RestoreSaveSnapshot(data.Campaign, data.ChapterId, data.ChapterPath);
+
+        if (data.Location == SaveLocation.WorldMap)
+        {
+            ShowMessage("正在返回世界地图存档……");
+            Error worldMapError = GetTree().ChangeSceneToFile("res://scenes/world/WorldMap.tscn");
+            if (worldMapError != Error.Ok)
+            {
+                ShowMessage($"无法切换到世界地图：{worldMapError}。");
+            }
+
+            return;
+        }
+
         if (!data.ChapterId.Equals(CampaignState.CurrentChapterId, StringComparison.OrdinalIgnoreCase))
         {
-            CampaignState.RestoreSaveSnapshot(data.Campaign, data.ChapterId, data.ChapterPath);
             CampaignState.BeginChapter(data.ChapterId, data.ChapterPath);
             SaveGameService.QueuePendingSceneRestore(data);
             ShowMessage($"正在切换到存档章节 {data.ChapterId}……");
@@ -273,6 +287,12 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
+        if (data.Location != SaveLocation.Battle)
+        {
+            GD.PushWarning("SaveGameCoordinator 收到非战斗待恢复存档，已忽略该临时对象。");
+            return;
+        }
+
         if (!data.ChapterId.Equals(CampaignState.CurrentChapterId, StringComparison.OrdinalIgnoreCase))
         {
             // 理论上不应发生；重新排队让下一帧/正确场景继续处理，而不是丢掉快照。
@@ -283,9 +303,15 @@ public partial class SaveGameCoordinator : Node
         ApplyLoadedData(data);
     }
 
-    /// <summary>验证并一次性恢复一份已经解析完成的存档。</summary>
+    /// <summary>验证并一次性恢复一份已经解析完成的战斗存档。</summary>
     private void ApplyLoadedData(SaveGameData data)
     {
+        if (data.Location != SaveLocation.Battle)
+        {
+            ShowMessage("这不是战斗内存档，不能套用到当前战场。");
+            return;
+        }
+
         if (!TryValidateSave(data, out List<ValidatedRestore> restores, out string validationMessage))
         {
             ShowMessage(validationMessage);
