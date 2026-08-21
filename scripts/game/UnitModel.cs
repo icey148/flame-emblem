@@ -213,6 +213,42 @@ public sealed class UnitModel
     }
 
     /// <summary>
+    /// 从已经验证过的本地存档恢复可变化的运行时状态。
+    /// 固定 ID、名称、阵营、职业定义和成长率仍由原始角色/章节数据提供，防止存档覆盖规则定义。
+    /// </summary>
+    public void RestoreRuntimeState(
+        Vector2I gridPosition,
+        WeaponDefinition equippedWeapon,
+        int level,
+        int experience,
+        int maxHp,
+        int currentHp,
+        int strength,
+        int magic,
+        int skill,
+        int speed,
+        int luck,
+        int defense,
+        int resistance,
+        bool hasActed)
+    {
+        GridPosition = gridPosition;
+        EquippedWeapon = equippedWeapon;
+        Level = Mathf.Max(1, level);
+        Experience = Mathf.Clamp(experience, 0, 99);
+        MaxHp = Mathf.Max(1, maxHp);
+        CurrentHp = Mathf.Clamp(currentHp, 0, MaxHp);
+        Strength = Mathf.Max(0, strength);
+        Magic = Mathf.Max(0, magic);
+        Skill = Mathf.Max(0, skill);
+        Speed = Mathf.Max(0, speed);
+        Luck = Mathf.Max(0, luck);
+        Defense = Mathf.Max(0, defense);
+        Resistance = Mathf.Max(0, resistance);
+        HasActed = hasActed;
+    }
+
+    /// <summary>
     /// 在新回合开始时清理单位的回合状态。
     /// </summary>
     public void ResetForNewTurn()
