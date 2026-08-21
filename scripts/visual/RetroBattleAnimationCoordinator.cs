@@ -5,14 +5,12 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 把真实 CombatExchangeResult 按攻击顺序播放成独立复古战斗演出。
-/// 时间线完全由 Godot Timer 驱动；玩家主动攻击优先播放，敌军攻击先等待地图移动动画结束。
+/// 战斗画面采用已经确认的参考稿布局：纯黑背景、敌军固定左侧、我方固定右侧、
+/// 双状态框与中央攻击提示框；本类只负责表现时间线，不改变任何战斗结算规则。
 /// </summary>
 public partial class RetroBattleAnimationCoordinator : Node
 {
-    /// <summary>
-    /// 等待播放的战斗交换及其表现快照。
-    /// EXP 必须在 BattleAnimationBus 事件触发瞬间记录，因为 MainGame 会在 ResolveExchange 返回以后才发放经验。
-    /// </summary>
+    /// <summary>等待播放的战斗交换及其表现快照。</summary>
     private readonly Queue<QueuedBattlePresentation> _queue = new();
 
     /// <summary>地图人物表现协调器，用于等待敌军地图移动完成。</summary>
@@ -21,25 +19,28 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>全屏输入拦截层。</summary>
     private Control? _blocker;
 
-    /// <summary>左侧战斗人物。</summary>
+    /// <summary>左侧战斗人物；标准布局中优先固定为敌军。</summary>
     private AnimatedBattleCharacterControl? _leftCharacter;
 
-    /// <summary>右侧战斗人物。</summary>
+    /// <summary>右侧战斗人物；标准布局中优先固定为我方。</summary>
     private AnimatedBattleCharacterControl? _rightCharacter;
 
-    /// <summary>左侧人物顶部名称。</summary>
+    /// <summary>
+    /// 兼容旧表现协调器保留的左侧姓名标签。
+    /// 新标准稿已经把姓名放进底部状态框，因此该标签默认隐藏。
+    /// </summary>
     private Label? _leftLabel;
 
-    /// <summary>右侧人物顶部名称。</summary>
+    /// <summary>兼容旧表现协调器保留的右侧姓名标签。</summary>
     private Label? _rightLabel;
 
-    /// <summary>中央逐击结果文本。</summary>
+    /// <summary>中央攻击/命中/经验提示文字。</summary>
     private Label? _resultLabel;
 
-    /// <summary>双方 HP、伤害和玩家 EXP 的底部战斗 HUD。</summary>
+    /// <summary>双方 HP、HIT、ATC、DEF 的底部状态框。</summary>
     private RetroBattleStatusHudControl? _statusHud;
 
-    /// <summary>命中、闪避、必杀和魔法的程序特效层。</summary>
+    /// <summary>命中、闪避、必杀和武器轨迹程序特效层。</summary>
     private RetroBattleEffectControl? _effectControl;
 
     /// <summary>驱动 Intro/Windup/Impact/Recovery/Outro 的阶段计时器。</summary>
@@ -54,10 +55,10 @@ public partial class RetroBattleAnimationCoordinator : Node
     /// <summary>当前正在播放的表现快照。</summary>
     private QueuedBattlePresentation? _currentPresentation;
 
-    /// <summary>当前交换左侧固定人物。</summary>
+    /// <summary>当前交换画面左侧固定人物。</summary>
     private UnitModel? _leftUnit;
 
-    /// <summary>当前交换右侧固定人物。</summary>
+    /// <summary>当前交换画面右侧固定人物。</summary>
     private UnitModel? _rightUnit;
 
     /// <summary>当前正在播放第几次攻击。</summary>
@@ -90,7 +91,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         _blocker?.Hide();
     }
 
-    /// <summary>创建 Timer 时间线和战斗 UI。</summary>
+    /// <summary>创建 Timer 时间线和标准稿式战斗 UI。</summary>
     public override void _Ready()
     {
         ProcessMode = ProcessModeEnum.Always;
@@ -99,10 +100,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         CreateBattleOverlay();
     }
 
-    /// <summary>
-    /// 收到真实战斗结果后保存表现所需快照并入队。
-    /// 这里发生在 MainGame 发放 EXP 之前，因此可以安全记录经验增长前的等级和经验值。
-    /// </summary>
+    /// <summary>收到真实战斗结果后保存表现所需快照并入队。</summary>
     private void OnExchangeResolved(CombatExchangeResult exchange)
     {
         if (exchange.Strikes.Count == 0)
@@ -110,16 +108,14 @@ public partial class RetroBattleAnimationCoordinator : Node
             return;
         }
 
-        UnitModel leftUnit = exchange.InitiatingAttacker;
-        UnitModel rightUnit = exchange.InitiatingDefender;
         UnitModel? experienceUnit = exchange.Strikes
             .Select(strike => strike.Attacker)
             .FirstOrDefault(unit => unit.Team == UnitTeam.Player);
 
         QueuedBattlePresentation presentation = new(
             exchange,
-            leftUnit.MaxHp,
-            rightUnit.MaxHp,
+            exchange.InitiatingAttacker.MaxHp,
+            exchange.InitiatingDefender.MaxHp,
             experienceUnit,
             experienceUnit?.Level ?? 0,
             experienceUnit?.Experience ?? 0);
@@ -176,9 +172,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         AddChild(_movementGateTimer);
     }
 
-    /// <summary>
-    /// 敌军战斗至少延后一个短计时周期，让地图人物层先检测 GridPosition 改变并创建移动动画。
-    /// </summary>
+    /// <summary>敌军战斗至少延后一个短计时周期，让地图人物移动先完成。</summary>
     private void RequestStartAfterMovement()
     {
         if (_currentPresentation is not null || _queue.Count == 0 || _movementGateTimer is null)
@@ -192,7 +186,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
     }
 
-    /// <summary>地图仍在移动时继续等待；全部到达后才打开敌军横向战斗界面。</summary>
+    /// <summary>地图仍在移动时继续等待；全部到达后才打开战斗界面。</summary>
     private void CheckMovementAndStartExchange()
     {
         if (_currentPresentation is not null || _queue.Count == 0)
@@ -209,7 +203,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         StartNextExchangeNow();
     }
 
-    /// <summary>从队列取出下一场战斗并正式打开演出。</summary>
+    /// <summary>从队列取出下一场战斗并按“敌左我右”固定双方。</summary>
     private void StartNextExchangeNow()
     {
         if (_currentPresentation is not null || _queue.Count == 0)
@@ -228,10 +222,14 @@ public partial class RetroBattleAnimationCoordinator : Node
         _movementGateTimer?.Stop();
         _currentPresentation = presentation;
         _strikeIndex = 0;
-        _leftUnit = exchange.InitiatingAttacker;
-        _rightUnit = exchange.InitiatingDefender;
+        AssignScreenSides(exchange);
 
-        // 先标记全局表现状态，再显示遮罩；地图移动层会据此暂停后台人物动画。
+        if (_leftUnit is null || _rightUnit is null)
+        {
+            EmergencyFinishExchange("无法确定战斗双方画面位置");
+            return;
+        }
+
         BattleAnimationBus.BeginPlayback();
         _blocker?.Show();
         _leftCharacter?.SetUnit(_leftUnit);
@@ -255,13 +253,27 @@ public partial class RetroBattleAnimationCoordinator : Node
             _resultLabel.Text = "战斗开始";
         }
 
+        bool attackerOnLeft = ReferenceEquals(_leftUnit, exchange.InitiatingAttacker);
+        int leftHpBefore = attackerOnLeft
+            ? exchange.InitiatingAttackerHpBefore
+            : exchange.InitiatingDefenderHpBefore;
+        int rightHpBefore = attackerOnLeft
+            ? exchange.InitiatingDefenderHpBefore
+            : exchange.InitiatingAttackerHpBefore;
+        int leftMaxHpBefore = attackerOnLeft
+            ? presentation.AttackerMaxHpBefore
+            : presentation.DefenderMaxHpBefore;
+        int rightMaxHpBefore = attackerOnLeft
+            ? presentation.DefenderMaxHpBefore
+            : presentation.AttackerMaxHpBefore;
+
         _statusHud?.BeginBattle(
             _leftUnit,
-            exchange.InitiatingAttackerHpBefore,
-            presentation.LeftMaxHpBefore,
+            leftHpBefore,
+            leftMaxHpBefore,
             _rightUnit,
-            exchange.InitiatingDefenderHpBefore,
-            presentation.RightMaxHpBefore,
+            rightHpBefore,
+            rightMaxHpBefore,
             presentation.ExperienceUnit,
             presentation.ExperienceLevelBefore,
             presentation.ExperienceBefore);
@@ -270,7 +282,34 @@ public partial class RetroBattleAnimationCoordinator : Node
             MinimumExchangeTimeoutSeconds,
             exchange.Strikes.Count * MaximumSecondsPerStrike + 3.0);
         _watchdogTimer?.Start(timeout);
-        SchedulePhase(PlaybackPhase.Intro, 0.28);
+        SchedulePhase(PlaybackPhase.Intro, 0.24);
+    }
+
+    /// <summary>
+    /// 标准稿固定敌军在左、我方在右。
+    /// 如果未来出现非敌我战斗，则回退到攻击方左、防守方右，避免表现层阻断规则测试。
+    /// </summary>
+    private void AssignScreenSides(CombatExchangeResult exchange)
+    {
+        UnitModel attacker = exchange.InitiatingAttacker;
+        UnitModel defender = exchange.InitiatingDefender;
+
+        if (attacker.Team == UnitTeam.Enemy && defender.Team == UnitTeam.Player)
+        {
+            _leftUnit = attacker;
+            _rightUnit = defender;
+            return;
+        }
+
+        if (attacker.Team == UnitTeam.Player && defender.Team == UnitTeam.Enemy)
+        {
+            _leftUnit = defender;
+            _rightUnit = attacker;
+            return;
+        }
+
+        _leftUnit = attacker;
+        _rightUnit = defender;
     }
 
     /// <summary>切换到指定演出阶段并启动 Timer。</summary>
@@ -313,7 +352,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
     }
 
-    /// <summary>开始当前一击的蓄力/攻击动作。</summary>
+    /// <summary>开始当前一击，并把中央提示改成“某某的攻击”。</summary>
     private void StartCurrentStrike()
     {
         CombatStrikeResult? strike = CurrentStrike();
@@ -339,15 +378,13 @@ public partial class RetroBattleAnimationCoordinator : Node
         if (_resultLabel is not null)
         {
             string costText = strike.HpCostPaid > 0 ? $"  HP -{strike.HpCostPaid}" : string.Empty;
-            _resultLabel.Text = $"{strike.Attacker.DisplayName}  {strike.Attacker.EquippedWeapon.DisplayName}{costText}";
+            _resultLabel.Text = $"{strike.Attacker.DisplayName}的攻击{costText}";
         }
 
         SchedulePhase(PlaybackPhase.Windup, CurrentWindupDuration());
     }
 
-    /// <summary>
-    /// 显示命中、闪避、必杀或倒下结果，并在同一时刻推进底部 HP/伤害 HUD。
-    /// </summary>
+    /// <summary>显示命中、闪避、必杀或倒下结果，并同步推进 HP。</summary>
     private void StartImpact()
     {
         CombatStrikeResult? strike = CurrentStrike();
@@ -360,8 +397,6 @@ public partial class RetroBattleAnimationCoordinator : Node
         AnimatedBattleCharacterControl? attackerControl = ControlFor(strike.Attacker);
         AnimatedBattleCharacterControl? defenderControl = ControlFor(strike.Defender);
         attackerControl?.Play(CharacterAnimationState.Idle);
-
-        // 血条在真正的命中时刻变化，法术 HP 成本和伤害都按真实逐击顺序重放。
         _statusHud?.ApplyStrike(strike);
 
         if (!strike.Hit)
@@ -370,7 +405,7 @@ public partial class RetroBattleAnimationCoordinator : Node
             _effectControl?.Play(RetroBattleEffectKind.Dodge, IsLeftUnit(strike.Attacker));
             if (_resultLabel is not null)
             {
-                _resultLabel.Text = $"MISS  ·  命中率 {strike.HitRate}%";
+                _resultLabel.Text = "未命中";
             }
         }
         else
@@ -386,11 +421,11 @@ public partial class RetroBattleAnimationCoordinator : Node
             {
                 string criticalText = strike.Critical ? "必杀！  " : string.Empty;
                 string defeatText = strike.DefenderDefeated ? "  ·  击倒" : string.Empty;
-                _resultLabel.Text = $"{criticalText}{strike.Damage} DAMAGE{defeatText}";
+                _resultLabel.Text = $"{criticalText}造成 {strike.Damage} 伤害{defeatText}";
             }
         }
 
-        SchedulePhase(PlaybackPhase.Impact, 0.42);
+        SchedulePhase(PlaybackPhase.Impact, 0.40);
     }
 
     /// <summary>结果展示完成后恢复待机。</summary>
@@ -410,7 +445,7 @@ public partial class RetroBattleAnimationCoordinator : Node
         }
 
         _effectControl?.Clear();
-        SchedulePhase(PlaybackPhase.Recovery, 0.22);
+        SchedulePhase(PlaybackPhase.Recovery, 0.20);
     }
 
     /// <summary>进入下一次反击/追击，或进入战后 EXP 展示。</summary>
@@ -438,8 +473,7 @@ public partial class RetroBattleAnimationCoordinator : Node
                 : "战斗结束";
         }
 
-        // 有玩家实际参与攻击时多停留一点时间，让 EXP 与升级信息可读。
-        double outroDuration = _currentPresentation.ExperienceUnit is null ? 0.55 : 1.15;
+        double outroDuration = _currentPresentation.ExperienceUnit is null ? 0.52 : 1.00;
         SchedulePhase(PlaybackPhase.Outro, outroDuration);
     }
 
@@ -543,8 +577,8 @@ public partial class RetroBattleAnimationCoordinator : Node
     }
 
     /// <summary>
-    /// 创建全屏战斗演出 UI。
-    /// 人物控件使用 420×408，使内部正式纹理区域恰好为 384×384：96px 素材为 4×，128px 素材为 3×，避免非整数拉伸造成模糊。
+    /// 创建参考稿式全屏战斗界面。
+    /// 人物使用 420×390 整数像素空间；状态框从 y=390 开始，人物脚部正好落在状态框上沿附近。
     /// </summary>
     private void CreateBattleOverlay()
     {
@@ -567,144 +601,163 @@ public partial class RetroBattleAnimationCoordinator : Node
         {
             Position = Vector2.Zero,
             Size = new Vector2(1280, 720),
-            Color = new Color(0.018f, 0.022f, 0.032f, 0.94f),
+            Color = Colors.Black,
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
         _blocker.AddChild(backdrop);
 
-        PanelContainer battlePanel = new()
-        {
-            Position = new Vector2(80, 70),
-            Size = new Vector2(1120, 580),
-            MouseFilter = Control.MouseFilterEnum.Ignore
-        };
-        _blocker.AddChild(battlePanel);
-
-        StyleBoxFlat panelStyle = new()
-        {
-            BgColor = new Color(0.055f, 0.065f, 0.08f, 1.0f),
-            BorderColor = new Color(0.48f, 0.37f, 0.22f, 1.0f),
-            BorderWidthLeft = 3,
-            BorderWidthTop = 3,
-            BorderWidthRight = 3,
-            BorderWidthBottom = 3,
-            CornerRadiusTopLeft = 0,
-            CornerRadiusTopRight = 0,
-            CornerRadiusBottomLeft = 0,
-            CornerRadiusBottomRight = 0
-        };
-        battlePanel.AddThemeStyleboxOverride("panel", panelStyle);
-
         Control stage = new()
         {
-            CustomMinimumSize = new Vector2(1100, 560),
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            Name = "ReferenceBattleStage",
+            Position = Vector2.Zero,
+            Size = new Vector2(1280, 720),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
-        battlePanel.AddChild(stage);
+        _blocker.AddChild(stage);
 
-        // 96×96 正式素材会落到 384×384 的整数 4 倍显示区，128×128 则正好是整数 3 倍。
+        // 敌军固定站在左侧，我方固定站在右侧；全部坐标使用整数，避免亚像素插值模糊。
         _leftCharacter = new AnimatedBattleCharacterControl
         {
-            Position = new Vector2(25, 48),
-            Size = new Vector2(420, 408),
+            Position = new Vector2(100, 4),
+            Size = new Vector2(420, 390),
             MirrorHorizontally = false,
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         stage.AddChild(_leftCharacter);
 
         _rightCharacter = new AnimatedBattleCharacterControl
         {
-            Position = new Vector2(655, 48),
-            Size = new Vector2(420, 408),
+            Position = new Vector2(760, 4),
+            Size = new Vector2(420, 390),
             MirrorHorizontally = true,
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         stage.AddChild(_rightCharacter);
 
-        _leftLabel = CreateTopLabel(new Vector2(45, 10), new Vector2(360, 34), HorizontalAlignment.Left);
-        stage.AddChild(_leftLabel);
-
-        _rightLabel = CreateTopLabel(new Vector2(695, 10), new Vector2(360, 34), HorizontalAlignment.Right);
-        stage.AddChild(_rightLabel);
-
-        Label versus = CreateTopLabel(new Vector2(500, 10), new Vector2(100, 34), HorizontalAlignment.Center);
-        versus.Text = "VS";
-        stage.AddChild(versus);
-
-        _resultLabel = new Label
+        // 旧协调器仍通过反射读取两个姓名字段，因此保留不可见兼容标签。
+        _leftLabel = new Label
         {
-            Position = new Vector2(360, 395),
-            Size = new Vector2(380, 36),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
+            Visible = false,
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
-        _resultLabel.AddThemeColorOverride("font_color", new Color(0.96f, 0.90f, 0.73f));
-        _resultLabel.AddThemeFontSizeOverride("font_size", 20);
-        stage.AddChild(_resultLabel);
+        stage.AddChild(_leftLabel);
+
+        _rightLabel = new Label
+        {
+            Visible = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        stage.AddChild(_rightLabel);
 
         _effectControl = new RetroBattleEffectControl
         {
             Position = Vector2.Zero,
-            Size = new Vector2(1100, 430),
+            Size = new Vector2(1280, 390),
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            Visible = false
+            Visible = true,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         stage.AddChild(_effectControl);
 
         _statusHud = new RetroBattleStatusHudControl
         {
-            Position = new Vector2(35, 432),
-            Size = new Vector2(1030, 116),
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            Position = new Vector2(50, 390),
+            Size = new Vector2(1180, 286),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         stage.AddChild(_statusHud);
+
+        // 中央信息框压在两边状态框上方，结构和参考稿保持一致但文字与比例为原创实现。
+        PanelContainer resultPanel = new()
+        {
+            Position = new Vector2(390, 348),
+            Size = new Vector2(500, 88),
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        resultPanel.AddThemeStyleboxOverride("panel", BuildReferencePanelStyle());
+        stage.AddChild(resultPanel);
+
+        _resultLabel = new Label
+        {
+            Text = "战斗开始",
+            CustomMinimumSize = new Vector2(492, 80),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        _resultLabel.AddThemeColorOverride("font_color", new Color("f3f3ef"));
+        _resultLabel.AddThemeColorOverride("font_shadow_color", Colors.Black);
+        _resultLabel.AddThemeConstantOverride("shadow_offset_x", 2);
+        _resultLabel.AddThemeConstantOverride("shadow_offset_y", 2);
+        _resultLabel.AddThemeFontSizeOverride("font_size", 28);
+        resultPanel.AddChild(_resultLabel);
 
         Button skipButton = new()
         {
             Text = "跳过",
-            Position = new Vector2(995, 8),
-            Size = new Vector2(80, 34),
+            Position = new Vector2(1168, 18),
+            Size = new Vector2(82, 36),
             MouseFilter = Control.MouseFilterEnum.Stop
         };
+        StyleReferenceButton(skipButton);
         skipButton.Pressed += SkipAllBattleAnimations;
         stage.AddChild(skipButton);
     }
 
-    /// <summary>创建顶部人物名称标签。</summary>
-    private static Label CreateTopLabel(Vector2 position, Vector2 size, HorizontalAlignment alignment)
+    /// <summary>创建中央信息框使用的纯黑白硬边样式。</summary>
+    private static StyleBoxFlat BuildReferencePanelStyle()
     {
-        Label label = new()
+        return new StyleBoxFlat
         {
-            Position = position,
-            Size = size,
-            HorizontalAlignment = alignment,
-            VerticalAlignment = VerticalAlignment.Center,
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            BgColor = Colors.Black,
+            BorderColor = new Color("f3f3ef"),
+            BorderWidthLeft = 4,
+            BorderWidthTop = 4,
+            BorderWidthRight = 4,
+            BorderWidthBottom = 4,
+            CornerRadiusTopLeft = 0,
+            CornerRadiusTopRight = 0,
+            CornerRadiusBottomLeft = 0,
+            CornerRadiusBottomRight = 0
         };
-        label.AddThemeColorOverride("font_color", new Color(0.92f, 0.88f, 0.78f));
-        label.AddThemeFontSizeOverride("font_size", 19);
-        return label;
     }
 
-    /// <summary>
-    /// 保存一场战斗在表现层开始播放前必须冻结的数值。
-    /// UnitModel 本体会在动画期间继续保留真实最终结算，因此 HP/EXP 的起点不能延迟读取。
-    /// </summary>
+    /// <summary>让跳过按钮也使用同一套黑底白框像素语言。</summary>
+    private static void StyleReferenceButton(Button button)
+    {
+        StyleBoxFlat normal = BuildReferencePanelStyle();
+        StyleBoxFlat hover = BuildReferencePanelStyle();
+        hover.BgColor = new Color("181a20");
+        StyleBoxFlat pressed = BuildReferencePanelStyle();
+        pressed.BgColor = new Color("2a2d34");
+
+        button.AddThemeStyleboxOverride("normal", normal);
+        button.AddThemeStyleboxOverride("hover", hover);
+        button.AddThemeStyleboxOverride("pressed", pressed);
+        button.AddThemeColorOverride("font_color", new Color("f3f3ef"));
+        button.AddThemeColorOverride("font_hover_color", Colors.White);
+        button.AddThemeFontSizeOverride("font_size", 14);
+    }
+
+    /// <summary>保存一场战斗在表现层开始播放前必须冻结的数值。</summary>
     private sealed class QueuedBattlePresentation
     {
         /// <summary>创建表现快照。</summary>
         public QueuedBattlePresentation(
             CombatExchangeResult exchange,
-            int leftMaxHpBefore,
-            int rightMaxHpBefore,
+            int attackerMaxHpBefore,
+            int defenderMaxHpBefore,
             UnitModel? experienceUnit,
             int experienceLevelBefore,
             int experienceBefore)
         {
             Exchange = exchange;
-            LeftMaxHpBefore = Math.Max(1, leftMaxHpBefore);
-            RightMaxHpBefore = Math.Max(1, rightMaxHpBefore);
+            AttackerMaxHpBefore = Math.Max(1, attackerMaxHpBefore);
+            DefenderMaxHpBefore = Math.Max(1, defenderMaxHpBefore);
             ExperienceUnit = experienceUnit;
             ExperienceLevelBefore = experienceLevelBefore;
             ExperienceBefore = Math.Clamp(experienceBefore, 0, 99);
@@ -713,11 +766,11 @@ public partial class RetroBattleAnimationCoordinator : Node
         /// <summary>已经结算完成的真实战斗交换。</summary>
         public CombatExchangeResult Exchange { get; }
 
-        /// <summary>左侧单位开战时最大 HP。</summary>
-        public int LeftMaxHpBefore { get; }
+        /// <summary>原始攻击方开战时最大 HP。</summary>
+        public int AttackerMaxHpBefore { get; }
 
-        /// <summary>右侧单位开战时最大 HP。</summary>
-        public int RightMaxHpBefore { get; }
+        /// <summary>原始防守方开战时最大 HP。</summary>
+        public int DefenderMaxHpBefore { get; }
 
         /// <summary>本场实际参与攻击、因此可能获得经验的玩家单位。</summary>
         public UnitModel? ExperienceUnit { get; }
