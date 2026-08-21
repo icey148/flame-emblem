@@ -10,18 +10,6 @@ namespace FlameEmblem.Visual;
 /// </summary>
 public partial class RetroBattleStatusHudControl : Control
 {
-    /// <summary>单侧状态框宽度；与参考稿两侧大框比例对齐。</summary>
-    private const float PanelWidth = 540.0f;
-
-    /// <summary>左右状态框之间的固定窄间隔。</summary>
-    private const float PanelGap = 30.0f;
-
-    /// <summary>单侧状态框总高度；上半身份区和下半数据区都保留参考稿的大块留白。</summary>
-    private const float PanelHeight = 380.0f;
-
-    /// <summary>身份区高度；中央提示框会覆盖该区域下半部。</summary>
-    private const float IdentityHeight = 172.0f;
-
     /// <summary>外框像素厚度。</summary>
     private const float BorderThickness = 4.0f;
 
@@ -181,7 +169,12 @@ public partial class RetroBattleStatusHudControl : Control
     public override void _Draw()
     {
         DrawSidePanel(new Vector2(0, 0), _leftUnit, _leftHp, _leftMaxHp, _rightUnit);
-        DrawSidePanel(new Vector2(PanelWidth + PanelGap, 0), _rightUnit, _rightHp, _rightMaxHp, _leftUnit);
+        DrawSidePanel(
+            new Vector2(ReferenceBattleLayout.PanelWidth + ReferenceBattleLayout.PanelGap, 0),
+            _rightUnit,
+            _rightHp,
+            _rightMaxHp,
+            _leftUnit);
     }
 
     /// <summary>绘制单侧状态框、阵营色数据区和四条分段计量条。</summary>
@@ -200,18 +193,22 @@ public partial class RetroBattleStatusHudControl : Control
         Color white = new("f3f3ef");
         Color black = new("050608");
 
-        Rect2 fullPanel = new(origin, new Vector2(PanelWidth, PanelHeight));
+        Rect2 fullPanel = new(
+            origin,
+            new Vector2(ReferenceBattleLayout.PanelWidth, ReferenceBattleLayout.PanelHeight));
         Rect2 dataPanel = new(
-            origin + new Vector2(0, IdentityHeight),
-            new Vector2(PanelWidth, PanelHeight - IdentityHeight));
+            origin + new Vector2(0, ReferenceBattleLayout.IdentityHeight),
+            new Vector2(
+                ReferenceBattleLayout.PanelWidth,
+                ReferenceBattleLayout.PanelHeight - ReferenceBattleLayout.IdentityHeight));
 
         // 参考稿使用纯黑身份区和高对比白色硬边框，不再使用青铜或灰蓝框架。
         DrawRect(fullPanel, black, true);
         DrawRect(dataPanel, dataBackground, true);
         DrawRect(fullPanel, white, false, BorderThickness);
         DrawLine(
-            origin + new Vector2(0, IdentityHeight),
-            origin + new Vector2(PanelWidth, IdentityHeight),
+            origin + new Vector2(0, ReferenceBattleLayout.IdentityHeight),
+            origin + new Vector2(ReferenceBattleLayout.PanelWidth, ReferenceBattleLayout.IdentityHeight),
             white,
             BorderThickness,
             false);
@@ -285,7 +282,7 @@ public partial class RetroBattleStatusHudControl : Control
         _leftClassLabel = CreatePixelLabel(new Vector2(28, 82), new Vector2(320, 42), HorizontalAlignment.Left, 24);
         _leftLevelLabel = CreatePixelLabel(new Vector2(388, 34), new Vector2(122, 42), HorizontalAlignment.Right, 25);
 
-        float rightX = PanelWidth + PanelGap;
+        float rightX = ReferenceBattleLayout.PanelWidth + ReferenceBattleLayout.PanelGap;
         _rightNameLabel = CreatePixelLabel(new Vector2(rightX + 28, 28), new Vector2(340, 48), HorizontalAlignment.Left, 29);
         _rightClassLabel = CreatePixelLabel(new Vector2(rightX + 28, 82), new Vector2(320, 42), HorizontalAlignment.Left, 24);
         _rightLevelLabel = CreatePixelLabel(new Vector2(rightX + 388, 34), new Vector2(122, 42), HorizontalAlignment.Right, 25);
@@ -334,6 +331,7 @@ public partial class RetroBattleStatusHudControl : Control
         label.AddThemeConstantOverride("shadow_offset_x", 2);
         label.AddThemeConstantOverride("shadow_offset_y", 2);
         label.AddThemeFontSizeOverride("font_size", fontSize);
+        label.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
         return label;
     }
 
