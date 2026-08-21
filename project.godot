@@ -1,6 +1,6 @@
 ; Godot project configuration for the Flame Emblem playable foundation.
-; The visual baseline is 1280x720 and all runtime enlargement uses integer scaling
-; so low-resolution battle characters and UI edges never pass through fractional pixels.
+; The visual baseline is 1280x720. The scene is rendered into that fixed viewport
+; first and only then enlarged by integer multiples, preventing fractional pixel sampling.
 config_version=5
 
 [application]
@@ -12,7 +12,7 @@ window/size/viewport_width=1280
 window/size/viewport_height=720
 window/size/window_width_override=1280
 window/size/window_height_override=720
-window/stretch/mode="canvas_items"
+window/stretch/mode="viewport"
 window/stretch/aspect="keep"
 window/stretch/scale_mode="integer"
 
