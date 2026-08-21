@@ -1,0 +1,38 @@
+{
+  "id": "chapter_02",
+  "title": "第一章：东境道路",
+  "width": 15,
+  "height": 10,
+  "victory_condition": "rout",
+  "victory_target_id": "",
+  "terrain": [
+    {
+      "type": "river",
+      "cells": [[9,0],[9,1],[9,2],[9,3],[9,4],[9,6],[9,7],[9,8],[9,9]]
+    },
+    {
+      "type": "bridge",
+      "cells": [[9,5]]
+    },
+    {
+      "type": "forest",
+      "cells": [[3,1],[4,1],[5,1],[3,2],[6,3],[6,4],[5,7],[6,7],[7,7],[11,1],[12,1],[12,2],[11,8],[12,8]]
+    },
+    {
+      "type": "fort",
+      "cells": [[12,4],[13,6]]
+    }
+  ],
+  "units": [
+    { "unit_id": "adrian", "instance_id": "adrian", "team": "player", "x": 1, "y": 4 },
+    { "unit_id": "celine", "instance_id": "celine", "team": "player", "x": 1, "y": 6 },
+    { "unit_id": "rowan", "instance_id": "rowan", "team": "player", "x": 2, "y": 5 },
+    { "unit_id": "mira", "instance_id": "mira", "team": "player", "x": 1, "y": 5 },
+    { "unit_id": "raider", "instance_id": "road_enemy_01", "team": "enemy", "x": 10, "y": 2 },
+    { "unit_id": "raider", "instance_id": "road_enemy_02", "team": "enemy", "x": 11, "y": 4 },
+    { "unit_id": "raider", "instance_id": "road_enemy_03", "team": "enemy", "x": 11, "y": 7 },
+    { "unit_id": "guard", "instance_id": "road_enemy_04", "team": "enemy", "x": 12, "y": 3 },
+    { "unit_id": "guard", "instance_id": "road_enemy_05", "team": "enemy", "x": 13, "y": 6 },
+    { "unit_id": "raider", "instance_id": "road_enemy_06", "team": "enemy", "x": 13, "y": 8 }
+  ]
+}
