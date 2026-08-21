@@ -5,8 +5,8 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 统一地图 HUD、回合条和横向战斗界面的敌我阵营表现。
-/// 本协调器只读取现有状态并修改颜色/挂载表现层，不参与移动、目标选择、伤害、经验或回合推进。
+/// 统一地图 HUD、回合条和战斗特效的阵营表现。
+/// 正式战斗状态框已经直接绘制敌方粉红/我方深蓝，因此本协调器不再给战斗 HUD 叠加额外边框。
 /// </summary>
 public partial class TeamPresentationCoordinator : Node
 {
@@ -40,28 +40,10 @@ public partial class TeamPresentationCoordinator : Node
     /// <summary>横向战斗协调器。</summary>
     private RetroBattleAnimationCoordinator? _battleCoordinator;
 
-    /// <summary>横向战斗左侧单位字段。</summary>
-    private FieldInfo? _leftUnitField;
-
-    /// <summary>横向战斗右侧单位字段。</summary>
-    private FieldInfo? _rightUnitField;
-
-    /// <summary>横向战斗左侧姓名标签字段。</summary>
-    private FieldInfo? _leftLabelField;
-
-    /// <summary>横向战斗右侧姓名标签字段。</summary>
-    private FieldInfo? _rightLabelField;
-
-    /// <summary>横向战斗底部状态 HUD 字段。</summary>
-    private FieldInfo? _statusHudField;
-
     /// <summary>横向战斗程序特效字段。</summary>
     private FieldInfo? _effectControlField;
 
-    /// <summary>是否已经成功挂载底部阵营 HUD 层。</summary>
-    private bool _battleHudOverlayAttached;
-
-    /// <summary>是否已经成功挂载新的战斗特效层。</summary>
+    /// <summary>是否已经成功挂载新的紧凑战斗特效层。</summary>
     private bool _battleEffectOverlayAttached;
 
     /// <summary>上一次应用到地图主 HUD 的阵营；避免每帧重复创建 StyleBox。</summary>
@@ -70,7 +52,7 @@ public partial class TeamPresentationCoordinator : Node
     /// <summary>上一次地图主 HUD 是否处于攻击目标强调状态。</summary>
     private bool _lastMapHudTargeting;
 
-    /// <summary>缓存全部需要的表现字段。</summary>
+    /// <summary>缓存需要的表现字段。</summary>
     public override void _Ready()
     {
         // 放在现有 HUD/人物表现协调器之后执行，确保同一帧最终颜色以阵营统一层为准。
@@ -94,23 +76,16 @@ public partial class TeamPresentationCoordinator : Node
         _retroHudCoordinator = GetNodeOrNull<RetroHudCoordinator>("../RetroHudCoordinator");
         _phaseLabelField = typeof(RetroHudCoordinator).GetField("_phaseLabel", members);
 
+        // 战斗状态框已经自带阵营颜色；这里只保留紧凑像素特效的挂载入口。
         _battleCoordinator = GetNodeOrNull<RetroBattleAnimationCoordinator>("../RetroBattleAnimationCoordinator");
-        Type battleType = typeof(RetroBattleAnimationCoordinator);
-        _leftUnitField = battleType.GetField("_leftUnit", members);
-        _rightUnitField = battleType.GetField("_rightUnit", members);
-        _leftLabelField = battleType.GetField("_leftLabel", members);
-        _rightLabelField = battleType.GetField("_rightLabel", members);
-        _statusHudField = battleType.GetField("_statusHud", members);
-        _effectControlField = battleType.GetField("_effectControl", members);
+        _effectControlField = typeof(RetroBattleAnimationCoordinator).GetField("_effectControl", members);
     }
 
-    /// <summary>持续同步地图 HUD、回合条和横向战斗阵营色，并等待动态控件创建完成后挂载表现层。</summary>
+    /// <summary>持续同步地图 HUD、回合条，并等待动态战斗特效控件创建完成。</summary>
     public override void _Process(double delta)
     {
         RefreshMapHudAccent();
         RefreshPhaseAccent();
-        RefreshBattleNameAccents();
-        TryAttachBattleHudOverlay();
         TryAttachBattleEffectOverlay();
     }
 
@@ -214,70 +189,6 @@ public partial class TeamPresentationCoordinator : Node
         phaseLabel.AddThemeColorOverride("font_color", color);
     }
 
-    /// <summary>横向战斗顶部双方姓名直接使用各自阵营高亮色。</summary>
-    private void RefreshBattleNameAccents()
-    {
-        if (_battleCoordinator is null)
-        {
-            return;
-        }
-
-        UnitModel? leftUnit = _leftUnitField?.GetValue(_battleCoordinator) as UnitModel;
-        UnitModel? rightUnit = _rightUnitField?.GetValue(_battleCoordinator) as UnitModel;
-        Label? leftLabel = _leftLabelField?.GetValue(_battleCoordinator) as Label;
-        Label? rightLabel = _rightLabelField?.GetValue(_battleCoordinator) as Label;
-
-        if (leftUnit is not null && leftLabel is not null)
-        {
-            StyleBattleName(leftLabel, leftUnit.Team);
-        }
-
-        if (rightUnit is not null && rightLabel is not null)
-        {
-            StyleBattleName(rightLabel, rightUnit.Team);
-        }
-    }
-
-    /// <summary>给单侧战斗姓名添加阵营色和统一像素阴影。</summary>
-    private static void StyleBattleName(Label label, UnitTeam team)
-    {
-        label.AddThemeColorOverride("font_color", TeamVisualPalette.Highlight(team).Lightened(0.10f));
-        label.AddThemeColorOverride("font_shadow_color", new Color(0.02f, 0.02f, 0.025f, 0.92f));
-        label.AddThemeConstantOverride("shadow_offset_x", 2);
-        label.AddThemeConstantOverride("shadow_offset_y", 2);
-    }
-
-    /// <summary>等待状态 HUD 创建完成后挂载一次阵营边框层。</summary>
-    private void TryAttachBattleHudOverlay()
-    {
-        if (_battleHudOverlayAttached || _battleCoordinator is null)
-        {
-            return;
-        }
-
-        if (_statusHudField?.GetValue(_battleCoordinator) is not RetroBattleStatusHudControl statusHud)
-        {
-            return;
-        }
-
-        if (statusHud.GetChildren().OfType<BattleTeamHudOverlayControl>().Any())
-        {
-            _battleHudOverlayAttached = true;
-            return;
-        }
-
-        BattleTeamHudOverlayControl overlay = new()
-        {
-            Name = "BattleTeamHudOverlay",
-            Position = Vector2.Zero,
-            Size = statusHud.Size,
-            MouseFilter = Control.MouseFilterEnum.Ignore
-        };
-        statusHud.AddChild(overlay);
-        overlay.Bind(statusHud);
-        _battleHudOverlayAttached = true;
-    }
-
     /// <summary>等待原战斗特效层创建完成后挂载新的紧凑像素特效。</summary>
     private void TryAttachBattleEffectOverlay()
     {
@@ -302,7 +213,8 @@ public partial class TeamPresentationCoordinator : Node
             Name = "CinematicBattleEffectOverlay",
             Position = Vector2.Zero,
             Size = effectControl.Size,
-            MouseFilter = Control.MouseFilterEnum.Ignore
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
         effectControl.AddChild(overlay);
         overlay.Bind(effectControl);
