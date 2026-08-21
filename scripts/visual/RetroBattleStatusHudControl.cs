@@ -5,22 +5,22 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 横向战斗画面的左右状态框。
-/// 视觉结构以当前确认的参考稿为标准：黑色身份区、粗白像素边框、阵营色数据区以及 HP/HIT/ATC/DEF 分段条。
+/// 视觉结构严格按当前确认的参考稿规格：黑色身份区、粗白像素边框、阵营色数据区，以及 HP/HIT/ATC/DEF 分段条。
 /// 本控件只重放已经结算好的 HP，并读取单位当前属性用于表现，不参与任何真实战斗判定。
 /// </summary>
 public partial class RetroBattleStatusHudControl : Control
 {
-    /// <summary>单侧状态框宽度。</summary>
-    private const float PanelWidth = 560.0f;
+    /// <summary>单侧状态框宽度；与参考稿两侧大框比例对齐。</summary>
+    private const float PanelWidth = 540.0f;
 
-    /// <summary>左右状态框之间的固定间隔。</summary>
-    private const float PanelGap = 60.0f;
+    /// <summary>左右状态框之间的固定窄间隔。</summary>
+    private const float PanelGap = 30.0f;
 
-    /// <summary>单侧状态框总高度。</summary>
-    private const float PanelHeight = 286.0f;
+    /// <summary>单侧状态框总高度；上半身份区和下半数据区都保留参考稿的大块留白。</summary>
+    private const float PanelHeight = 380.0f;
 
-    /// <summary>身份区高度。</summary>
-    private const float IdentityHeight = 112.0f;
+    /// <summary>身份区高度；中央提示框会覆盖该区域下半部。</summary>
+    private const float IdentityHeight = 172.0f;
 
     /// <summary>外框像素厚度。</summary>
     private const float BorderThickness = 4.0f;
@@ -149,7 +149,7 @@ public partial class RetroBattleStatusHudControl : Control
 
     /// <summary>
     /// 返回本场真实获得的经验值。
-    /// 参考稿战斗框不再额外塞入 EXP 小面板，EXP/升级结果由中央信息框展示。
+    /// 参考稿战斗框不额外塞入 EXP 小面板，EXP/升级结果由中央信息框展示。
     /// </summary>
     public int ShowExperienceResult()
     {
@@ -201,12 +201,11 @@ public partial class RetroBattleStatusHudControl : Control
         Color black = new("050608");
 
         Rect2 fullPanel = new(origin, new Vector2(PanelWidth, PanelHeight));
-        Rect2 identityPanel = new(origin, new Vector2(PanelWidth, IdentityHeight));
         Rect2 dataPanel = new(
             origin + new Vector2(0, IdentityHeight),
             new Vector2(PanelWidth, PanelHeight - IdentityHeight));
 
-        // 参考稿使用纯黑身份区和高对比白色硬边框，不再使用青铜/灰蓝框架。
+        // 参考稿使用纯黑身份区和高对比白色硬边框，不再使用青铜或灰蓝框架。
         DrawRect(fullPanel, black, true);
         DrawRect(dataPanel, dataBackground, true);
         DrawRect(fullPanel, white, false, BorderThickness);
@@ -217,7 +216,7 @@ public partial class RetroBattleStatusHudControl : Control
             BorderThickness,
             false);
 
-        // 数据区顶部与底部各加一条更深阵营色，形成参考稿那种双层像素框感。
+        // 数据区只做一条上沿高光和一条底部暗线，保持参考稿简洁硬边的视觉密度。
         DrawRect(
             new Rect2(dataPanel.Position + new Vector2(7, 7), new Vector2(dataPanel.Size.X - 14, 3)),
             highlight,
@@ -235,16 +234,15 @@ public partial class RetroBattleStatusHudControl : Control
             : (unit.EquippedWeapon.DamageType == DamageType.Magical ? unit.Magic : unit.Strength) + unit.EquippedWeapon.Might;
         int defense = unit?.Defense ?? 0;
 
-        DrawMetricRow(origin, "HP", 128, hp, Math.Max(1, maxHp), white, emptySegment, true);
-        DrawMetricRow(origin, "HIT", 169, hit, 100, white, emptySegment, false);
-        DrawMetricRow(origin, "ATC", 210, attack, 40, white, emptySegment, false);
-        DrawMetricRow(origin, "DEF", 251, defense, 30, white, emptySegment, false);
+        DrawMetricRow(origin, 194, hp, Math.Max(1, maxHp), white, emptySegment, true);
+        DrawMetricRow(origin, 242, hit, 100, white, emptySegment, false);
+        DrawMetricRow(origin, 290, attack, 40, white, emptySegment, false);
+        DrawMetricRow(origin, 338, defense, 30, white, emptySegment, false);
     }
 
-    /// <summary>绘制一行标签与固定 24 格像素计量条。</summary>
+    /// <summary>绘制一行固定 24 格像素计量条。</summary>
     private void DrawMetricRow(
         Vector2 origin,
-        string label,
         float y,
         int value,
         int maxValue,
@@ -252,11 +250,10 @@ public partial class RetroBattleStatusHudControl : Control
         Color empty,
         bool hpRow)
     {
-        // 文字由 DrawString 绘制会依赖系统字体抗锯齿，因此标签仍交给独立 Label 风格；这里仅绘制条本体。
-        // 行首留出 90px 给 HP/HIT/ATC/DEF 标签，条本体全部锁到整数坐标。
+        // 行首预留给 HP/HIT/ATC/DEF 标签，条本体锁在参考稿同样的横向占比。
         Rect2 meterRect = new(
-            origin + new Vector2(108, y),
-            new Vector2(414, hpRow ? 20 : 18));
+            origin + new Vector2(120, y),
+            new Vector2(390, hpRow ? 22 : 20));
         DrawSegmentMeter(meterRect, value, maxValue, filled, empty);
     }
 
@@ -284,14 +281,14 @@ public partial class RetroBattleStatusHudControl : Control
     /// <summary>创建身份区和数据区所需的全部文字标签。</summary>
     private void CreateIdentityLabels()
     {
-        _leftNameLabel = CreatePixelLabel(new Vector2(24, 16), new Vector2(350, 42), HorizontalAlignment.Left, 27);
-        _leftClassLabel = CreatePixelLabel(new Vector2(24, 57), new Vector2(320, 36), HorizontalAlignment.Left, 22);
-        _leftLevelLabel = CreatePixelLabel(new Vector2(398, 22), new Vector2(132, 36), HorizontalAlignment.Right, 23);
+        _leftNameLabel = CreatePixelLabel(new Vector2(28, 28), new Vector2(340, 48), HorizontalAlignment.Left, 29);
+        _leftClassLabel = CreatePixelLabel(new Vector2(28, 82), new Vector2(320, 42), HorizontalAlignment.Left, 24);
+        _leftLevelLabel = CreatePixelLabel(new Vector2(388, 34), new Vector2(122, 42), HorizontalAlignment.Right, 25);
 
         float rightX = PanelWidth + PanelGap;
-        _rightNameLabel = CreatePixelLabel(new Vector2(rightX + 24, 16), new Vector2(350, 42), HorizontalAlignment.Left, 27);
-        _rightClassLabel = CreatePixelLabel(new Vector2(rightX + 24, 57), new Vector2(320, 36), HorizontalAlignment.Left, 22);
-        _rightLevelLabel = CreatePixelLabel(new Vector2(rightX + 398, 22), new Vector2(132, 36), HorizontalAlignment.Right, 23);
+        _rightNameLabel = CreatePixelLabel(new Vector2(rightX + 28, 28), new Vector2(340, 48), HorizontalAlignment.Left, 29);
+        _rightClassLabel = CreatePixelLabel(new Vector2(rightX + 28, 82), new Vector2(320, 42), HorizontalAlignment.Left, 24);
+        _rightLevelLabel = CreatePixelLabel(new Vector2(rightX + 388, 34), new Vector2(122, 42), HorizontalAlignment.Right, 25);
 
         foreach (Label label in new[]
                  {
@@ -306,15 +303,15 @@ public partial class RetroBattleStatusHudControl : Control
             AddChild(label);
         }
 
-        // 数据区标签单独创建，位置与分段条严格对应。
-        AddChild(CreateMetricLabel(new Vector2(24, 122), "HP"));
-        AddChild(CreateMetricLabel(new Vector2(24, 163), "HIT"));
-        AddChild(CreateMetricLabel(new Vector2(24, 204), "ATC"));
-        AddChild(CreateMetricLabel(new Vector2(24, 245), "DEF"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 122), "HP"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 163), "HIT"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 204), "ATC"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 24, 245), "DEF"));
+        // 数据区标签位置与四条分段条严格对齐。
+        AddChild(CreateMetricLabel(new Vector2(28, 187), "HP"));
+        AddChild(CreateMetricLabel(new Vector2(28, 235), "HIT"));
+        AddChild(CreateMetricLabel(new Vector2(28, 283), "ATC"));
+        AddChild(CreateMetricLabel(new Vector2(28, 331), "DEF"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 187), "HP"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 235), "HIT"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 283), "ATC"));
+        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 331), "DEF"));
     }
 
     /// <summary>创建身份文字，使用粗白字和黑色像素阴影提高黑底可读性。</summary>
@@ -343,7 +340,7 @@ public partial class RetroBattleStatusHudControl : Control
     /// <summary>创建 HP/HIT/ATC/DEF 行首标签。</summary>
     private static Label CreateMetricLabel(Vector2 position, string text)
     {
-        Label label = CreatePixelLabel(position, new Vector2(78, 28), HorizontalAlignment.Left, 22);
+        Label label = CreatePixelLabel(position, new Vector2(82, 32), HorizontalAlignment.Left, 24);
         label.Text = text;
         return label;
     }
