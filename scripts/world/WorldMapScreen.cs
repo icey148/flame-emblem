@@ -5,14 +5,14 @@ namespace FlameEmblem.World;
 
 /// <summary>
 /// 原创复古世界地图界面。
-/// 节点位置、类型和解锁要求来自 world_map.json；本脚本只负责绘制路线和处理节点点击。
+/// 节点位置、类型和解锁要求来自 world_map.json；本脚本负责路线绘制、节点操作以及章节间长期存档入口。
 /// </summary>
 public partial class WorldMapScreen : Node2D
 {
     /// <summary>世界地图数据。</summary>
     private WorldMapDefinition? _map;
 
-    /// <summary>底部状态文本，用于显示节点说明和祠堂结果。</summary>
+    /// <summary>底部状态文本，用于显示节点说明、祠堂结果和保存反馈。</summary>
     private Label? _statusLabel;
 
     /// <summary>世界地图按钮列表，切换状态时统一刷新。</summary>
@@ -159,7 +159,7 @@ public partial class WorldMapScreen : Node2D
         }
     }
 
-    /// <summary>创建标题、说明和每个世界地图节点的按钮。</summary>
+    /// <summary>创建标题、说明、章节节点以及世界地图存档控制。</summary>
     private void CreateInterface()
     {
         if (_map is null)
@@ -171,7 +171,7 @@ public partial class WorldMapScreen : Node2D
         {
             Text = $"FLAME EMBLEM   {_map.Title}",
             Position = new Vector2(42, 24),
-            Size = new Vector2(760, 42)
+            Size = new Vector2(650, 42)
         };
         // Godot 4 使用主题覆盖接口设置字号，避免依赖不存在的对象初始化属性。
         title.AddThemeFontSizeOverride("font_size", 26);
@@ -180,11 +180,29 @@ public partial class WorldMapScreen : Node2D
         Label hint = new()
         {
             Text = "选择地图节点。完成战斗会解锁新的路线与休整地点。",
-            Position = new Vector2(820, 30),
-            Size = new Vector2(410, 34),
+            Position = new Vector2(680, 30),
+            Size = new Vector2(370, 34),
             HorizontalAlignment = HorizontalAlignment.Right
         };
         AddChild(hint);
+
+        Button saveJourneyButton = new()
+        {
+            Text = "保存旅程",
+            Position = new Vector2(1060, 22),
+            Size = new Vector2(100, 38)
+        };
+        saveJourneyButton.Pressed += SaveJourney;
+        AddChild(saveJourneyButton);
+
+        Button titleButton = new()
+        {
+            Text = "返回标题",
+            Position = new Vector2(1168, 22),
+            Size = new Vector2(92, 38)
+        };
+        titleButton.Pressed += ReturnToTitle;
+        AddChild(titleButton);
 
         foreach (WorldMapNodeDefinition node in _map.Nodes)
         {
@@ -209,7 +227,7 @@ public partial class WorldMapScreen : Node2D
         _statusLabel = new Label
         {
             Text = CampaignState.HasPlayerRoster
-                ? "序章战果已经带回世界地图。可以休整、重返旧战场，或查看下一条路线。"
+                ? "战果已经带回世界地图。可以休整、重返旧战场，或继续向东境道路前进。"
                 : "世界地图准备完成。当前没有跨章节队伍数据。",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             VerticalAlignment = VerticalAlignment.Center,
@@ -268,7 +286,7 @@ public partial class WorldMapScreen : Node2D
                 SetStatus(CampaignState.RestAtShrine());
                 break;
             case WorldMapNodeType.FutureBattle:
-                SetStatus("东境道路已经开放。第二章战斗数据将在下一阶段接入，这个节点结构已经可以直接承载新章节。");
+                SetStatus($"{node.DisplayName} 已经开放，但当前还没有可进入的战斗数据。");
                 break;
         }
 
@@ -289,6 +307,37 @@ public partial class WorldMapScreen : Node2D
         if (error != Error.Ok)
         {
             SetStatus($"无法进入 {node.DisplayName}：{error}。");
+        }
+    }
+
+    /// <summary>
+    /// 在章节间保存长期战役状态。
+    /// 世界地图没有敌军、格子和回合概念，因此 Units 留空并明确写入 SaveLocation.WorldMap。
+    /// </summary>
+    private void SaveJourney()
+    {
+        SaveGameData data = new()
+        {
+            Location = SaveLocation.WorldMap,
+            ChapterId = CampaignState.CurrentChapterId,
+            ChapterPath = CampaignState.CurrentChapterPath,
+            Round = 1,
+            LastBattleLog = "世界地图旅程存档。",
+            Units = new List<UnitSaveData>(),
+            Campaign = CampaignState.CreateSaveSnapshot()
+        };
+
+        SaveGameService.TrySave(data, out string message);
+        SetStatus(message);
+    }
+
+    /// <summary>返回标题画面；当前内存战役状态保留，真正继续仍以标题画面的本地存档为准。</summary>
+    private void ReturnToTitle()
+    {
+        Error error = GetTree().ChangeSceneToFile("res://scenes/title/TitleScreen.tscn");
+        if (error != Error.Ok)
+        {
+            SetStatus($"无法返回标题画面：{error}。");
         }
     }
 
