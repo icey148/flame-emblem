@@ -4,7 +4,8 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 对现有横向战斗演出做纯表现优化：提亮底色、加入像素战场舞台、调整人物站位，并替换缺少正式素材时的程序人物骨架。
+/// 对现有横向战斗演出做纯表现优化：提亮底色、加入像素战场舞台、调整人物站位，
+/// 并在缺少正式素材时挂载三段式战斗人物动画层。
 /// 不修改战斗时间线和数值逻辑，避免美术调整影响结算稳定性。
 /// </summary>
 public partial class BattlePresentationPolishCoordinator : Node
@@ -62,7 +63,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
     }
 
-    /// <summary>提亮遮罩和战斗框，插入新的像素舞台，并把人物稍微向中央收拢。</summary>
+    /// <summary>提亮遮罩和战斗框，插入新的像素舞台，并把人物收进更适合冲刺/突刺的站位。</summary>
     private bool TryApplyPolish()
     {
         if (_battleCoordinator is null ||
@@ -71,11 +72,11 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 全屏底色从近黑改成偏蓝灰，仍然压暗地图但不再让战斗界面显得沉闷。
+        // 全屏底色使用偏蓝灰，让深蓝我方和粉红敌方都能从背景上稳定分离。
         ColorRect? fullBackdrop = blocker.GetChildren().OfType<ColorRect>().FirstOrDefault();
         if (fullBackdrop is not null)
         {
-            fullBackdrop.Color = new Color(0.10f, 0.13f, 0.16f, 0.94f);
+            fullBackdrop.Color = new Color(0.09f, 0.12f, 0.16f, 0.94f);
         }
 
         PanelContainer? battlePanel = blocker.GetChildren().OfType<PanelContainer>().FirstOrDefault();
@@ -86,8 +87,8 @@ public partial class BattlePresentationPolishCoordinator : Node
 
         battlePanel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
         {
-            // 面板本身只做浅暗蓝灰框架，真正的战场颜色由舞台背景承担。
-            BgColor = new Color(0.14f, 0.17f, 0.18f, 1.0f),
+            // 面板只保留蓝灰框架；真正的战场颜色由舞台背景承担。
+            BgColor = new Color(0.13f, 0.17f, 0.20f, 1.0f),
             BorderColor = new Color(0.70f, 0.54f, 0.30f, 1.0f),
             BorderWidthLeft = 3,
             BorderWidthTop = 3,
@@ -104,7 +105,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 新舞台放在 stage 的第一个子节点，保证人物、特效、结果文字和底部 HUD 全部绘制在它上面。
+        // 新舞台放在第一个子节点，人物、武器特效、结果文字和底部 HUD 都在它上面。
         RetroBattleStageBackdropControl stageBackdrop = new()
         {
             Name = "PolishedBattleStageBackdrop",
@@ -115,24 +116,24 @@ public partial class BattlePresentationPolishCoordinator : Node
         stage.AddChild(stageBackdrop);
         stage.MoveChild(stageBackdrop, 0);
 
-        // 把双方人物稍微向中央收拢；仍保持整数坐标和原始 1:1 Control 缩放，避免像素重新变糊。
+        // 双方稍向画面中央靠拢，同时给快速前冲动作保留足够空间。
         if (_leftCharacterField?.GetValue(_battleCoordinator) is AnimatedBattleCharacterControl leftCharacter)
         {
-            leftCharacter.Position = new Vector2(48, 48);
+            leftCharacter.Position = new Vector2(48, 46);
             leftCharacter.Scale = Vector2.One;
-            leftCharacter.Modulate = new Color(1.04f, 1.04f, 1.02f, 1.0f);
-            AttachRefinedFigure(leftCharacter, "LeftRefinedBattleFigure");
+            leftCharacter.Modulate = new Color(1.03f, 1.03f, 1.02f, 1.0f);
+            AttachCinematicFigure(leftCharacter, "LeftCinematicBattleFigure");
         }
 
         if (_rightCharacterField?.GetValue(_battleCoordinator) is AnimatedBattleCharacterControl rightCharacter)
         {
-            rightCharacter.Position = new Vector2(632, 48);
+            rightCharacter.Position = new Vector2(632, 46);
             rightCharacter.Scale = Vector2.One;
-            rightCharacter.Modulate = new Color(1.04f, 1.04f, 1.02f, 1.0f);
-            AttachRefinedFigure(rightCharacter, "RightRefinedBattleFigure");
+            rightCharacter.Modulate = new Color(1.03f, 1.03f, 1.02f, 1.0f);
+            AttachCinematicFigure(rightCharacter, "RightCinematicBattleFigure");
         }
 
-        // 中央结果文字改成亮米黄色并增强阴影，在亮背景上也能保持清晰。
+        // 中央结果文字使用亮米黄色并增强阴影，在亮背景上也保持清晰。
         if (_resultLabelField?.GetValue(_battleCoordinator) is Label resultLabel)
         {
             resultLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.93f, 0.72f));
@@ -146,18 +147,18 @@ public partial class BattlePresentationPolishCoordinator : Node
     }
 
     /// <summary>
-    /// 给现有动画人物挂载新的修长程序人物绘制层。
-    /// 原控件仍负责 SetUnit/Play/动作计时；新层只读取这些状态并替换旧的方块身体。
-    /// 正式 battle PNG 存在时新层会自动让位。
+    /// 给现有动画人物挂载新的三段式程序战斗人物层。
+    /// 原控件继续负责 SetUnit/Play/动作计时；新层只读取状态并替换旧方块身体。
+    /// 正式 battle PNG 或正式状态帧存在时，新层会自动让位。
     /// </summary>
-    private static void AttachRefinedFigure(AnimatedBattleCharacterControl character, string overlayName)
+    private static void AttachCinematicFigure(AnimatedBattleCharacterControl character, string overlayName)
     {
-        if (character.GetChildren().OfType<RefinedBattleFigureControl>().Any())
+        if (character.GetChildren().OfType<CinematicBattleFigureControl>().Any())
         {
             return;
         }
 
-        RefinedBattleFigureControl overlay = new()
+        CinematicBattleFigureControl overlay = new()
         {
             Name = overlayName,
             Position = Vector2.Zero,
