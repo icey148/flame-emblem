@@ -6,54 +6,54 @@ using System.Reflection;
 namespace FlameEmblem.Main;
 
 /// <summary>
-/// 为当前单章节原型提供本地“保存进度 / 读取进度”入口。
-/// 存档本身由 SaveGameService 负责；本协调器只负责从 MainGame 取得运行时快照、恢复状态和创建右侧按钮。
+/// 为当前战斗章节提供本地“保存进度 / 读取进度”入口。
+/// 章节 ID 来自 CampaignState，因此序章和后续世界地图战斗共用同一套存档逻辑，不再写死 chapter_01。
 /// </summary>
 public partial class SaveGameCoordinator : Node
 {
     /// <summary>当前战斗主节点。</summary>
     private Node? _battleHost;
 
-    /// <summary>地图人物表现协调器，用于判断移动忙碌状态和读档后清除视觉移动缓存。</summary>
+    /// <summary>地图人物表现层，用于判断移动状态和读档后清除旧移动缓存。</summary>
     private CharacterVisualCoordinator? _visualCoordinator;
 
-    /// <summary>右侧批量指令协调器；全体进攻期间禁止保存/读取。</summary>
+    /// <summary>右侧批量指令协调器；全体进攻期间禁止读写存档。</summary>
     private RightCommandCoordinator? _rightCommandCoordinator;
 
     /// <summary>MainGame 全部单位字段。</summary>
     private FieldInfo? _unitsField;
 
-    /// <summary>MainGame 当前回合数字段。</summary>
+    /// <summary>MainGame 当前回合字段。</summary>
     private FieldInfo? _roundField;
 
     /// <summary>MainGame 当前阶段字段。</summary>
     private FieldInfo? _phaseField;
 
-    /// <summary>MainGame 当前选中单位字段；保存只允许发生在完整行动边界。</summary>
+    /// <summary>MainGame 当前选中单位字段。</summary>
     private FieldInfo? _selectedUnitField;
 
     /// <summary>MainGame 最近战斗记录字段。</summary>
     private FieldInfo? _lastBattleLogField;
 
-    /// <summary>MainGame 地图宽度字段，用于验证损坏存档中的坐标。</summary>
+    /// <summary>MainGame 地图宽度字段。</summary>
     private FieldInfo? _gridWidthField;
 
-    /// <summary>MainGame 地图高度字段，用于验证损坏存档中的坐标。</summary>
+    /// <summary>MainGame 地图高度字段。</summary>
     private FieldInfo? _gridHeightField;
 
-    /// <summary>MainGame 结束回合按钮字段，用来定位右侧 VBox。</summary>
+    /// <summary>MainGame 结束回合按钮字段，用于定位右侧按钮列。</summary>
     private FieldInfo? _endTurnButtonField;
 
-    /// <summary>MainGame 清除当前选择的方法。</summary>
+    /// <summary>MainGame 清空选择的方法。</summary>
     private MethodInfo? _clearSelectionMethod;
 
-    /// <summary>MainGame 清理敌军逐单位状态机临时数据的方法。</summary>
+    /// <summary>MainGame 清空敌军回合状态机的方法。</summary>
     private MethodInfo? _resetEnemyTurnSequenceMethod;
 
-    /// <summary>MainGame 统一刷新 HUD 的方法。</summary>
+    /// <summary>MainGame HUD 刷新方法。</summary>
     private MethodInfo? _updateHudMethod;
 
-    /// <summary>RightCommandCoordinator 的全体进攻状态字段。</summary>
+    /// <summary>RightCommandCoordinator 全体进攻状态字段。</summary>
     private FieldInfo? _groupAttackActiveField;
 
     /// <summary>保存按钮。</summary>
@@ -62,16 +62,13 @@ public partial class SaveGameCoordinator : Node
     /// <summary>读取按钮。</summary>
     private Button? _loadButton;
 
-    /// <summary>右侧保存/读取行是否已经成功创建。</summary>
+    /// <summary>右侧存档按钮是否已经创建。</summary>
     private bool _uiInitialized;
 
-    /// <summary>当前基础版本只支持这一张章节存档；多章节系统加入后改为从章节管理器读取。</summary>
-    private const string CurrentChapterId = "chapter_01";
-
-    /// <summary>缓存 MainGame 的必要接口，并等待右侧 HUD 完成创建。</summary>
+    /// <summary>缓存主场景接口并等待 MainGame 动态 HUD 创建完成。</summary>
     public override void _Ready()
     {
-        // 晚于 RightCommandCoordinator 的 HUD 整理，保证保存按钮永远追加在全体指令之后。
+        // 排在转职协调器之后，保证右侧顺序保持“批量指令 -> 转职 -> 存档”。
         ProcessPriority = 320;
         _battleHost = GetParent();
         _visualCoordinator = GetNodeOrNull<CharacterVisualCoordinator>("../CharacterVisualCoordinator");
@@ -84,8 +81,8 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
-        Type hostType = _battleHost.GetType();
         BindingFlags members = BindingFlags.Instance | BindingFlags.NonPublic;
+        Type hostType = _battleHost.GetType();
         _unitsField = hostType.GetField("_units", members);
         _roundField = hostType.GetField("_round", members);
         _phaseField = hostType.GetField("_phase", members);
@@ -122,35 +119,34 @@ public partial class SaveGameCoordinator : Node
         }
     }
 
-    /// <summary>等待 HUD 创建保存按钮，并持续刷新按钮可用状态。</summary>
+    /// <summary>等待右侧 HUD 完成创建，并持续刷新保存/读取按钮状态。</summary>
     public override void _Process(double delta)
     {
         if (!_uiInitialized)
         {
-            _uiInitialized = TryCreateSaveButtons();
+            _uiInitialized = TryCreateButtons();
         }
 
         RefreshButtonStates();
     }
 
-    /// <summary>在右侧指令列底部加入单槽位保存/读取按钮。</summary>
-    private bool TryCreateSaveButtons()
+    /// <summary>在右侧按钮列底部创建单槽位保存和读取按钮。</summary>
+    private bool TryCreateButtons()
     {
         if (_battleHost is null ||
             _endTurnButtonField?.GetValue(_battleHost) is not Button endTurnButton ||
             endTurnButton.GetParent() is not VBoxContainer column)
         {
-            // MainGame 的动态 HUD 还没创建完成，下一帧继续等待。
             return false;
         }
 
-        HBoxContainer saveRow = new()
+        HBoxContainer row = new()
         {
             Name = "SaveLoadRow",
             CustomMinimumSize = new Vector2(360, 36),
             Alignment = BoxContainer.AlignmentMode.Center
         };
-        column.AddChild(saveRow);
+        column.AddChild(row);
 
         _saveButton = new Button
         {
@@ -159,7 +155,7 @@ public partial class SaveGameCoordinator : Node
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
         };
         _saveButton.Pressed += SaveCurrentProgress;
-        saveRow.AddChild(_saveButton);
+        row.AddChild(_saveButton);
 
         _loadButton = new Button
         {
@@ -168,11 +164,11 @@ public partial class SaveGameCoordinator : Node
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
         };
         _loadButton.Pressed += LoadCurrentProgress;
-        saveRow.AddChild(_loadButton);
+        row.AddChild(_loadButton);
         return true;
     }
 
-    /// <summary>根据当前回合、动画和批量指令状态决定能否保存/读取。</summary>
+    /// <summary>根据回合、动画、选择和批量指令状态决定按钮是否可用。</summary>
     private void RefreshButtonStates()
     {
         if (_saveButton is null || _loadButton is null)
@@ -186,16 +182,16 @@ public partial class SaveGameCoordinator : Node
                     IsGroupAttackActive();
         bool hasSelection = _battleHost is not null && _selectedUnitField?.GetValue(_battleHost) is UnitModel;
 
-        // 保存必须位于一次完整单位行动的边界，否则不保存“已经移动但尚未待机/攻击”的半行动状态。
+        // 保存必须位于完整单位行动边界，避免保存“已经移动但还没攻击/待机”的半行动状态。
         _saveButton.Disabled = !playerPhase || busy || hasSelection;
         _loadButton.Disabled = !playerPhase || busy || !SaveGameService.HasSave;
         _loadButton.Text = SaveGameService.HasSave ? "读取进度" : "读取进度（无存档）";
     }
 
-    /// <summary>创建当前战场快照并写入 user:// 单槽位。</summary>
+    /// <summary>把当前章节完整运行时状态写入本地单槽位。</summary>
     private void SaveCurrentProgress()
     {
-        if (!CanOperateSaveSystem(requireActionBoundary: true, out string reason))
+        if (!CanOperate(requireActionBoundary: true, out string reason))
         {
             ShowMessage(reason);
             return;
@@ -203,20 +199,20 @@ public partial class SaveGameCoordinator : Node
 
         SaveGameData data = new()
         {
-            ChapterId = CurrentChapterId,
+            ChapterId = CampaignState.CurrentChapterId,
             Round = ReadRound(),
             LastBattleLog = ReadLastBattleLog(),
-            Units = ReadUnits().Select(CreateUnitSnapshot).ToList()
+            Units = ReadUnits().Select(CreateSnapshot).ToList()
         };
 
         SaveGameService.TrySave(data, out string message);
         ShowMessage(message);
     }
 
-    /// <summary>读取本地单槽位，完整验证后一次性恢复全部单位状态。</summary>
+    /// <summary>读取本地单槽位，并在完整验证通过后一次性恢复全部单位。</summary>
     private void LoadCurrentProgress()
     {
-        if (!CanOperateSaveSystem(requireActionBoundary: false, out string reason))
+        if (!CanOperate(requireActionBoundary: false, out string reason))
         {
             ShowMessage(reason);
             return;
@@ -228,14 +224,19 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
-        if (!TryValidateSave(data, out List<ValidatedUnitRestore> restores, out string validationMessage))
+        if (!data.ChapterId.Equals(CampaignState.CurrentChapterId, StringComparison.OrdinalIgnoreCase))
+        {
+            ShowMessage($"槽位 1 保存的是 {data.ChapterId}，当前正在进行 {CampaignState.CurrentChapterId}，请从对应世界地图节点进入后再读取。");
+            return;
+        }
+
+        if (!TryValidateSave(data, out List<ValidatedRestore> restores, out string validationMessage))
         {
             ShowMessage(validationMessage);
             return;
         }
 
-        // 所有 ID、职业、装备和坐标已经先验证完，这里才开始真正修改运行时对象，避免半读档状态。
-        foreach (ValidatedUnitRestore restore in restores)
+        foreach (ValidatedRestore restore in restores)
         {
             UnitSaveData state = restore.State;
             restore.Unit.RestoreRuntimeState(
@@ -266,8 +267,10 @@ public partial class SaveGameCoordinator : Node
             _clearSelectionMethod?.Invoke(_battleHost, null);
         }
 
+        // 读档后的角色状态也成为当前战役队伍状态，之后返回世界地图再进章节不会丢失读档结果。
+        CampaignState.CapturePlayerRoster(ReadUnits());
         SnapMapCharactersToLogicalPositions();
-        ShowMessage($"已读取槽位 1。第 {Math.Max(1, data.Round)} 回合继续。");
+        ShowMessage($"已读取槽位 1：{CampaignState.CurrentChapterId}，第 {Math.Max(1, data.Round)} 回合继续。");
 
         if (_battleHost is CanvasItem canvasItem)
         {
@@ -275,8 +278,8 @@ public partial class SaveGameCoordinator : Node
         }
     }
 
-    /// <summary>把一个运行时单位转换成纯数据存档快照。</summary>
-    private static UnitSaveData CreateUnitSnapshot(UnitModel unit)
+    /// <summary>把一个运行时单位转换为纯数据存档快照。</summary>
+    private static UnitSaveData CreateSnapshot(UnitModel unit)
     {
         return new UnitSaveData
         {
@@ -301,25 +304,18 @@ public partial class SaveGameCoordinator : Node
     }
 
     /// <summary>
-    /// 在恢复前验证整份存档，包含章节、单位集合、职业、装备、坐标与重复格。
-    /// 任何一项失败都不会修改现有游戏状态。
+    /// 恢复前验证整份存档：单位集合、职业、装备、地图坐标和存活单位重叠必须全部合法。
     /// </summary>
     private bool TryValidateSave(
         SaveGameData data,
-        out List<ValidatedUnitRestore> restores,
+        out List<ValidatedRestore> restores,
         out string message)
     {
-        restores = new List<ValidatedUnitRestore>();
-        if (!data.ChapterId.Equals(CurrentChapterId, StringComparison.OrdinalIgnoreCase))
-        {
-            message = $"这个存档属于章节 {data.ChapterId}，当前基础版本只能读取 {CurrentChapterId}。";
-            return false;
-        }
-
+        restores = new List<ValidatedRestore>();
         IReadOnlyList<UnitModel> units = ReadUnits();
         if (data.Units.Count != units.Count)
         {
-            message = "存档中的单位数量与当前章节不一致，已拒绝读取。";
+            message = "存档单位数量与当前章节不一致，已拒绝读取。";
             return false;
         }
 
@@ -327,7 +323,7 @@ public partial class SaveGameCoordinator : Node
             unit => unit.Id,
             StringComparer.OrdinalIgnoreCase);
         HashSet<string> seenIds = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<Vector2I> occupiedCells = new();
+        HashSet<Vector2I> occupied = new();
         int width = ReadGridWidth();
         int height = ReadGridHeight();
 
@@ -345,7 +341,6 @@ public partial class SaveGameCoordinator : Node
                 return false;
             }
 
-            // 转职后的职业允许与章节初始职业不同，但必须仍然存在于当前版本 classes.json。
             UnitClassDefinition? classDefinition = UnitClassCatalog.TryGet(state.ClassId);
             if (classDefinition is null)
             {
@@ -363,28 +358,25 @@ public partial class SaveGameCoordinator : Node
             Vector2I cell = new(state.X, state.Y);
             if (cell.X < 0 || cell.X >= width || cell.Y < 0 || cell.Y >= height)
             {
-                message = $"{unit.DisplayName} 的存档坐标超出地图范围。";
+                message = $"{unit.DisplayName} 的存档坐标超出当前地图范围。";
                 return false;
             }
 
-            // 已倒下单位仍保留最后位置；它们不参与当前地图占位，因此只检查存活单位之间是否重叠。
-            if (state.CurrentHp > 0 && !occupiedCells.Add(cell))
+            // 已倒下单位不占地图格；只阻止两个存活单位被损坏存档叠在同一格。
+            if (state.CurrentHp > 0 && !occupied.Add(cell))
             {
                 message = "存档中有两个存活单位占据同一格，已拒绝读取。";
                 return false;
             }
 
-            restores.Add(new ValidatedUnitRestore(unit, state, classDefinition, weapon));
+            restores.Add(new ValidatedRestore(unit, state, classDefinition, weapon));
         }
 
         message = "存档验证通过。";
         return true;
     }
 
-    /// <summary>
-    /// 清空 UnitCharacterLayer 的旧位置和移动动画缓存。
-    /// 下一帧人物层会把存档坐标当作初始位置记录，因此不会从读档前的位置播放长距离移动动画。
-    /// </summary>
+    /// <summary>清空地图人物层的旧位置缓存，使读档后角色瞬间同步到存档坐标。</summary>
     private void SnapMapCharactersToLogicalPositions()
     {
         if (_visualCoordinator is null)
@@ -392,15 +384,13 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
-        FieldInfo? layerField = typeof(CharacterVisualCoordinator).GetField(
-            "_unitCharacterLayer",
-            BindingFlags.Instance | BindingFlags.NonPublic);
+        BindingFlags members = BindingFlags.Instance | BindingFlags.NonPublic;
+        FieldInfo? layerField = typeof(CharacterVisualCoordinator).GetField("_unitCharacterLayer", members);
         if (layerField?.GetValue(_visualCoordinator) is not UnitCharacterLayer layer)
         {
             return;
         }
 
-        BindingFlags members = BindingFlags.Instance | BindingFlags.NonPublic;
         object? lastPositions = typeof(UnitCharacterLayer)
             .GetField("_lastGridPositions", members)
             ?.GetValue(layer);
@@ -408,14 +398,13 @@ public partial class SaveGameCoordinator : Node
             .GetField("_motions", members)
             ?.GetValue(layer);
 
-        // 两个对象都是 Dictionary；通过公开 Clear 方法清空即可，不依赖其私有 UnitMotion 泛型类型。
         lastPositions?.GetType().GetMethod("Clear")?.Invoke(lastPositions, null);
         motions?.GetType().GetMethod("Clear")?.Invoke(motions, null);
         layer.QueueRedraw();
     }
 
-    /// <summary>判断当前是否处于允许读写存档的安全时刻。</summary>
-    private bool CanOperateSaveSystem(bool requireActionBoundary, out string reason)
+    /// <summary>判断当前是否处于允许保存或读取的安全时刻。</summary>
+    private bool CanOperate(bool requireActionBoundary, out string reason)
     {
         if (!IsPlayerPhase())
         {
@@ -439,7 +428,7 @@ public partial class SaveGameCoordinator : Node
             _battleHost is not null &&
             _selectedUnitField?.GetValue(_battleHost) is UnitModel)
         {
-            reason = "请先让当前选中单位完成攻击或待机，再保存进度。";
+            reason = "请先让当前选中单位完成攻击、转职或待机，再保存进度。";
             return false;
         }
 
@@ -447,17 +436,13 @@ public partial class SaveGameCoordinator : Node
         return true;
     }
 
-    /// <summary>读取当前是否为玩家阶段；私有枚举通过名称比较避免依赖其内部类型。</summary>
+    /// <summary>读取当前是否为玩家阶段。</summary>
     private bool IsPlayerPhase()
     {
-        if (_battleHost is null || _phaseField is null)
-        {
-            return false;
-        }
-
-        return (_phaseField.GetValue(_battleHost)?.ToString() ?? string.Empty).Equals(
-            "Player",
-            StringComparison.Ordinal);
+        return _battleHost is not null &&
+               (_phaseField?.GetValue(_battleHost)?.ToString() ?? string.Empty).Equals(
+                   "Player",
+                   StringComparison.Ordinal);
     }
 
     /// <summary>读取全体进攻是否正在执行。</summary>
@@ -468,7 +453,7 @@ public partial class SaveGameCoordinator : Node
                active;
     }
 
-    /// <summary>读取当前全部单位。</summary>
+    /// <summary>读取全部单位。</summary>
     private IReadOnlyList<UnitModel> ReadUnits()
     {
         if (_battleHost is null || _unitsField is null)
@@ -480,7 +465,7 @@ public partial class SaveGameCoordinator : Node
                ?? Array.Empty<UnitModel>();
     }
 
-    /// <summary>读取当前回合数。</summary>
+    /// <summary>读取当前回合。</summary>
     private int ReadRound()
     {
         return _battleHost is not null && _roundField?.GetValue(_battleHost) is int round
@@ -512,7 +497,7 @@ public partial class SaveGameCoordinator : Node
             : 10;
     }
 
-    /// <summary>通过 MainGame 自己的 HUD 刷新入口显示存档反馈。</summary>
+    /// <summary>通过 MainGame 的 HUD 入口显示存档反馈。</summary>
     private void ShowMessage(string message)
     {
         if (_battleHost is null || _updateHudMethod is null)
@@ -527,8 +512,8 @@ public partial class SaveGameCoordinator : Node
         }
     }
 
-    /// <summary>保存经过验证的一条单位恢复计划。</summary>
-    private sealed record ValidatedUnitRestore(
+    /// <summary>一条已经验证好的单位恢复计划。</summary>
+    private sealed record ValidatedRestore(
         UnitModel Unit,
         UnitSaveData State,
         UnitClassDefinition ClassDefinition,
