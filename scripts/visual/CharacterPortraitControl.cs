@@ -12,6 +12,9 @@ public partial class CharacterPortraitControl : Control
     /// <summary>当前需要展示的单位；为空时显示中性像素占位轮廓。</summary>
     private UnitModel? _unit;
 
+    /// <summary>正式头像与面板边框之间至少保留的像素内边距。</summary>
+    private const float FormalPortraitPadding = 4.0f;
+
     /// <summary>节点就绪后启用最近邻过滤，保证头像素材和程序像素胸像保持硬边。</summary>
     public override void _Ready()
     {
@@ -33,9 +36,9 @@ public partial class CharacterPortraitControl : Control
     public override void _Draw()
     {
         Rect2 bounds = new(Vector2.Zero, Size);
-        DrawRect(bounds, new Color(0.055f, 0.06f, 0.075f, 0.96f), true);
-        DrawRect(new Rect2(Vector2.Zero, new Vector2(Size.X, 3)), new Color(0.34f, 0.35f, 0.39f), true);
-        DrawRect(new Rect2(new Vector2(0, Size.Y - 3), new Vector2(Size.X, 3)), new Color(0.18f, 0.19f, 0.22f), true);
+        DrawRect(bounds, new Color(0.075f, 0.082f, 0.096f, 0.97f), true);
+        DrawRect(new Rect2(Vector2.Zero, new Vector2(Size.X, 3)), new Color(0.46f, 0.45f, 0.40f), true);
+        DrawRect(new Rect2(new Vector2(0, Size.Y - 3), new Vector2(Size.X, 3)), new Color(0.23f, 0.24f, 0.25f), true);
 
         if (_unit is null)
         {
@@ -46,12 +49,37 @@ public partial class CharacterPortraitControl : Control
         Texture2D? portraitTexture = CharacterAssetResolver.TryLoad(_unit, CharacterArtSlot.Portrait);
         if (portraitTexture is not null)
         {
-            // 正式原创立绘使用最近邻过滤；素材自身负责透明背景和构图裁切。
-            DrawTextureRect(portraitTexture, bounds, false);
+            DrawFormalPortrait(portraitTexture, bounds);
             return;
         }
 
         DrawProceduralPixelPortrait(_unit);
+    }
+
+    /// <summary>
+    /// 以等比整数倍率绘制正式原创头像。
+    /// 64×64 标准头像在小 HUD 中保持 1×，在 230×240 详情页中可稳定使用 3×，不再被拉成非等比矩形。
+    /// </summary>
+    private void DrawFormalPortrait(Texture2D texture, Rect2 bounds)
+    {
+        int sourceWidth = Math.Max(1, texture.GetWidth());
+        int sourceHeight = Math.Max(1, texture.GetHeight());
+        float availableWidth = Math.Max(1.0f, bounds.Size.X - FormalPortraitPadding * 2.0f);
+        float availableHeight = Math.Max(1.0f, bounds.Size.Y - FormalPortraitPadding * 2.0f);
+
+        // 正式生产规格以 64×64 为主；只使用完整整数倍放大，绝不横向/纵向分别拉伸。
+        int integerScale = Math.Max(
+            1,
+            (int)MathF.Floor(MathF.Min(
+                availableWidth / sourceWidth,
+                availableHeight / sourceHeight)));
+        int targetWidth = sourceWidth * integerScale;
+        int targetHeight = sourceHeight * integerScale;
+        float targetX = Mathf.Round((bounds.Size.X - targetWidth) * 0.5f);
+        float targetY = Mathf.Round((bounds.Size.Y - targetHeight) * 0.5f);
+        Rect2 target = new(new Vector2(targetX, targetY), new Vector2(targetWidth, targetHeight));
+
+        DrawTextureRect(texture, target, false);
     }
 
     /// <summary>
@@ -210,11 +238,12 @@ public partial class CharacterPortraitControl : Control
         return Mathf.Max(2.0f, Mathf.Floor(raw));
     }
 
-    /// <summary>把 24×24 逻辑头像网格居中到当前控件。</summary>
+    /// <summary>把 24×24 逻辑头像网格居中到当前控件，并锁到整数屏幕像素。</summary>
     private Vector2 ResolvePortraitOrigin(float pixel)
     {
         Vector2 renderedSize = new(24.0f * pixel, 24.0f * pixel);
-        return (Size - renderedSize) * 0.5f;
+        Vector2 centered = (Size - renderedSize) * 0.5f;
+        return new Vector2(Mathf.Round(centered.X), Mathf.Round(centered.Y));
     }
 
     /// <summary>绘制一个头像逻辑像素块。</summary>
