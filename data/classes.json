@@ -8,11 +8,25 @@
       "max_attack_range": 1
     },
     {
+      "id": "sword_lord",
+      "name": "剑锋领主",
+      "move": 6,
+      "min_attack_range": 1,
+      "max_attack_range": 1
+    },
+    {
       "id": "scout",
       "name": "游骑兵",
       "move": 6,
       "min_attack_range": 1,
       "max_attack_range": 1
+    },
+    {
+      "id": "bow_knight",
+      "name": "鹰弓骑士",
+      "move": 7,
+      "min_attack_range": 1,
+      "max_attack_range": 3
     },
     {
       "id": "soldier",
@@ -22,11 +36,25 @@
       "max_attack_range": 1
     },
     {
+      "id": "royal_lancer",
+      "name": "王国枪卫",
+      "move": 5,
+      "min_attack_range": 1,
+      "max_attack_range": 2
+    },
+    {
       "id": "mage",
       "name": "术士",
       "move": 5,
       "min_attack_range": 1,
       "max_attack_range": 2
+    },
+    {
+      "id": "sage",
+      "name": "贤者",
+      "move": 5,
+      "min_attack_range": 1,
+      "max_attack_range": 3
     },
     {
       "id": "raider",
