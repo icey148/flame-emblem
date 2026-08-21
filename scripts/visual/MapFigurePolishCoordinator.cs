@@ -4,7 +4,7 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 等待 CharacterVisualCoordinator 创建 UnitCharacterLayer 后挂载新的地图人物绘制层。
+/// 等待 CharacterVisualCoordinator 创建 UnitCharacterLayer 后挂载新的地图人物绘制层与阵营识别层。
 /// 只替换表现，不改变单位路径、朝向、逻辑坐标或输入。
 /// </summary>
 public partial class MapFigurePolishCoordinator : Node
@@ -34,7 +34,7 @@ public partial class MapFigurePolishCoordinator : Node
         }
     }
 
-    /// <summary>等动态人物层存在后挂载一次新的绘制层。</summary>
+    /// <summary>等动态人物层存在后挂载一次新的绘制层和深蓝/粉红阵营识别层。</summary>
     public override void _Process(double delta)
     {
         if (_applied || _visualCoordinator is null || _unitLayerField is null)
@@ -47,19 +47,27 @@ public partial class MapFigurePolishCoordinator : Node
             return;
         }
 
-        if (source.GetChildren().OfType<RefinedMapFigureLayer>().Any())
+        RefinedMapFigureLayer? refinedLayer = source.GetChildren().OfType<RefinedMapFigureLayer>().FirstOrDefault();
+        if (refinedLayer is null)
         {
-            _applied = true;
-            SetProcess(false);
-            return;
+            refinedLayer = new RefinedMapFigureLayer
+            {
+                Name = "RefinedMapFigureLayer"
+            };
+            source.AddChild(refinedLayer);
+            refinedLayer.Bind(source);
         }
 
-        RefinedMapFigureLayer refinedLayer = new()
+        TeamMapIdentityOverlayLayer? identityLayer = source.GetChildren().OfType<TeamMapIdentityOverlayLayer>().FirstOrDefault();
+        if (identityLayer is null)
         {
-            Name = "RefinedMapFigureLayer"
-        };
-        source.AddChild(refinedLayer);
-        refinedLayer.Bind(source);
+            identityLayer = new TeamMapIdentityOverlayLayer
+            {
+                Name = "TeamMapIdentityOverlayLayer"
+            };
+            source.AddChild(identityLayer);
+            identityLayer.Bind(source);
+        }
 
         _applied = true;
         SetProcess(false);
