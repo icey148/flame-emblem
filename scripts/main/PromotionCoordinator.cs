@@ -168,7 +168,13 @@ public partial class PromotionCoordinator : Node
     private void ExecutePromotion()
     {
         UnitModel? unit = ReadSelectedUnit();
-        if (unit is null || !CanPromoteNow(unit, out PromotionRule? rule, out string reason) || rule is null)
+        if (unit is null)
+        {
+            ShowMessage("请先选择一名本回合尚未行动的我方角色。");
+            return;
+        }
+
+        if (!CanPromoteNow(unit, out PromotionRule? rule, out string reason) || rule is null)
         {
             ShowMessage(reason);
             return;
