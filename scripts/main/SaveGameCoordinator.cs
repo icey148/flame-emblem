@@ -236,6 +236,8 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
+        // 必须在恢复战役快照之前记录当前战场章节；恢复快照本身会把 CampaignState 切到存档章节。
+        string currentSceneChapterId = CampaignState.CurrentChapterId;
         CampaignState.RestoreSaveSnapshot(data.Campaign, data.ChapterId, data.ChapterPath);
 
         if (data.Location == SaveLocation.WorldMap)
@@ -250,7 +252,7 @@ public partial class SaveGameCoordinator : Node
             return;
         }
 
-        if (!data.ChapterId.Equals(CampaignState.CurrentChapterId, StringComparison.OrdinalIgnoreCase))
+        if (!data.ChapterId.Equals(currentSceneChapterId, StringComparison.OrdinalIgnoreCase))
         {
             CampaignState.BeginChapter(data.ChapterId, data.ChapterPath);
             SaveGameService.QueuePendingSceneRestore(data);
