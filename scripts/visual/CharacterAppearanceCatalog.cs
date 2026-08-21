@@ -5,7 +5,7 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 为当前角色选择原创程序像素外观。
-/// 个人配色、身体轮廓和武器轮廓与战斗数据分离，后续接入正式原创素材时可以直接替换这一层。
+/// 配色采用低饱和蓝灰、森林绿、银钢、柔和紫与酒红敌军色，保持古典日式战争幻想气质；人物轮廓与具体服装结构仍为原创。
 /// </summary>
 public static class CharacterAppearanceCatalog
 {
@@ -22,23 +22,23 @@ public static class CharacterAppearanceCatalog
         {
             if (classId == "sword_lord")
             {
-                // 晋升后增加明亮钢蓝甲片和更强金色饰边，身体轮廓从轻装升级为披风重甲剑士。
+                // 晋升后使用更亮的蓝钢与旧金饰边，保留主角蓝灰识别但避免高饱和塑料感。
                 return new CharacterAppearanceDefinition(
-                    new Color("684630"),
-                    new Color("647fa8"),
-                    new Color("e0bd69"),
-                    new Color("e8b78f"),
+                    new Color("5b4439"),
+                    new Color("7385a3"),
+                    new Color("d9b86c"),
+                    new Color("e4b590"),
                     true,
                     CharacterWeaponSilhouette.Sword,
                     CharacterBodySilhouette.Armored);
             }
 
-            // 主角基础职业保持蓝灰轻甲，让棕发、披风与金属边在亮战场上分层清楚。
+            // 主角基础职业使用低饱和蓝灰、棕发和黄铜点缀。
             return new CharacterAppearanceDefinition(
-                new Color("684630"),
-                new Color("486a98"),
-                new Color("d0aa62"),
-                new Color("e8b78f"),
+                new Color("5b4439"),
+                new Color("596d91"),
+                new Color("cdaa67"),
+                new Color("e4b590"),
                 true,
                 CharacterWeaponSilhouette.Sword,
                 CharacterBodySilhouette.Light);
@@ -48,23 +48,23 @@ public static class CharacterAppearanceCatalog
         {
             if (classId == "bow_knight")
             {
-                // 晋升弓骑士使用更深的森林绿和金属肩甲色，保留弓手纤细轮廓但提高高级职业辨识度。
+                // 晋升弓骑士使用偏灰深林绿与旧金，保持纤细远程职业的轻盈层次。
                 return new CharacterAppearanceDefinition(
-                    new Color("b97b48"),
-                    new Color("66826d"),
-                    new Color("e4c878"),
-                    new Color("efc09b"),
+                    new Color("ad7d4d"),
+                    new Color("70856f"),
+                    new Color("d7bf78"),
+                    new Color("e8ba96"),
                     true,
                     CharacterWeaponSilhouette.Bow,
                     CharacterBodySilhouette.Light);
             }
 
-            // 弓手使用柔和橙棕发与偏灰森林绿，避免弓和身体粘在一起。
+            // 基础弓手使用森林绿、米金和棕皮革气质，降低橙色与绿色的对比强度。
             return new CharacterAppearanceDefinition(
-                new Color("b97b48"),
-                new Color("557b62"),
-                new Color("dec982"),
-                new Color("efc09b"),
+                new Color("ad7d4d"),
+                new Color("5d7561"),
+                new Color("cdb875"),
+                new Color("e8ba96"),
                 false,
                 CharacterWeaponSilhouette.Bow,
                 CharacterBodySilhouette.Light);
@@ -74,23 +74,23 @@ public static class CharacterAppearanceCatalog
         {
             if (classId == "royal_lancer")
             {
-                // 晋升枪卫强化亮钢蓝胸甲和金色披风扣，使重甲层次明显高于基础士兵。
+                // 晋升枪卫提高银蓝钢明度并保留暖黄铜饰边，强调重甲但不做成纯亮银。
                 return new CharacterAppearanceDefinition(
-                    new Color("443832"),
-                    new Color("8a98a8"),
-                    new Color("c69a58"),
-                    new Color("d9a982"),
+                    new Color("4a3e37"),
+                    new Color("909ba8"),
+                    new Color("bea05f"),
+                    new Color("d8aa86"),
                     true,
                     CharacterWeaponSilhouette.Spear,
                     CharacterBodySilhouette.Armored);
             }
 
-            // 基础重甲使用钢蓝主体和暗红识别色。
+            // 基础重甲使用冷灰蓝钢主体和暗黄铜识别色。
             return new CharacterAppearanceDefinition(
-                new Color("443832"),
-                new Color("788493"),
-                new Color("a85a49"),
-                new Color("d9a982"),
+                new Color("4a3e37"),
+                new Color("798693"),
+                new Color("ad8a57"),
+                new Color("d8aa86"),
                 false,
                 CharacterWeaponSilhouette.Spear,
                 CharacterBodySilhouette.Armored);
@@ -100,51 +100,51 @@ public static class CharacterAppearanceCatalog
         {
             if (classId == "sage")
             {
-                // 贤者使用更明亮的灰紫长袍与金紫饰边，让施法者晋升后在地图和战斗画面都能立即看出变化。
+                // 贤者使用更亮的灰紫与米金饰边，保持柔和神秘感而不使用荧光紫。
                 return new CharacterAppearanceDefinition(
-                    new Color("80608a"),
-                    new Color("706aa0"),
-                    new Color("e0b56c"),
-                    new Color("edbf9a"),
+                    new Color("79677f"),
+                    new Color("7b7194"),
+                    new Color("d1b16e"),
+                    new Color("e8b997"),
                     true,
                     CharacterWeaponSilhouette.Tome,
                     CharacterBodySilhouette.Robed);
             }
 
-            // 基础法师使用偏灰紫色，保持长袍和头发层次。
+            // 基础法师使用低饱和紫灰长袍、灰紫头发和暖米金点缀。
             return new CharacterAppearanceDefinition(
-                new Color("76527c"),
-                new Color("5c5789"),
-                new Color("c084d4"),
-                new Color("edbf9a"),
+                new Color("706079"),
+                new Color("625d7f"),
+                new Color("bda474"),
+                new Color("e8b997"),
                 true,
                 CharacterWeaponSilhouette.Tome,
                 CharacterBodySilhouette.Robed);
         }
 
-        // 通用敌军继续比玩家整体更暗，保证战斗中双方阵营可以只看轮廓和明度就快速区分。
+        // 通用敌军使用低饱和酒红、褐铁和暗金，和我方冷色系形成稳定阵营区分。
         return classId switch
         {
             "guard" => new CharacterAppearanceDefinition(
-                new Color("403833"),
-                new Color("756555"),
-                new Color("bc8258"),
+                new Color("403733"),
+                new Color("665954"),
+                new Color("a77c58"),
                 new Color("d2a07d"),
                 false,
                 CharacterWeaponSilhouette.Spear,
                 CharacterBodySilhouette.Armored),
             "captain" => new CharacterAppearanceDefinition(
-                new Color("2e2927"),
-                new Color("783838"),
-                new Color("c9a258"),
+                new Color("302925"),
+                new Color("6b3438"),
+                new Color("b99458"),
                 new Color("d5a37f"),
                 true,
                 CharacterWeaponSilhouette.Sword,
                 CharacterBodySilhouette.Armored),
             _ => new CharacterAppearanceDefinition(
-                new Color("5d4437"),
-                new Color("70473f"),
-                new Color("b66d4c"),
+                new Color("584237"),
+                new Color("65423f"),
+                new Color("9f684f"),
                 new Color("d3a17e"),
                 false,
                 CharacterWeaponSilhouette.Sword,
