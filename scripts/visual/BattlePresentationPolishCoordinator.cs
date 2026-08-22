@@ -94,18 +94,18 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 程序人物以 4px 为逻辑像素，0.75 倍后正好得到 3px 屏幕像素。
-        // 内部绘制和节点偏移都经过补偿，因此最终边缘仍落在整数屏幕像素上。
+        // 标准人物内部继续以 4px 为逻辑像素，外层 0.75 倍后得到严格的 3px 屏幕像素。
+        // 新人物层使用短身宽肩比例，因此不再出现旧版细长火柴人轮廓。
         ConfigureBattleCharacter(
             leftCharacter,
             ReferenceBattleLayout.LeftCharacterPosition + new Vector2(0.5f, 0.25f),
             false,
-            "LeftCinematicBattleFigure");
+            "LeftReferenceBattleFigure");
         ConfigureBattleCharacter(
             rightCharacter,
             ReferenceBattleLayout.RightCharacterPosition + new Vector2(0.5f, 0.25f),
             true,
-            "RightCinematicBattleFigure");
+            "RightReferenceBattleFigure");
 
         // 双状态框、人物区域和中央信息框全部读取同一份规格。
         statusHud.Position = ReferenceBattleLayout.StatusHudPosition;
@@ -160,7 +160,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
     }
 
-    /// <summary>统一设置单侧战斗人物的 3× 逻辑像素缩放，并挂载最终程序人物层。</summary>
+    /// <summary>统一设置单侧战斗人物的 3× 逻辑像素缩放，并挂载标准稿人物层。</summary>
     private static void ConfigureBattleCharacter(
         AnimatedBattleCharacterControl character,
         Vector2 position,
@@ -173,21 +173,27 @@ public partial class BattlePresentationPolishCoordinator : Node
         character.MirrorHorizontally = mirrored;
         character.Modulate = Colors.White;
         character.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
-        AttachCinematicFigure(character, overlayName);
+        AttachReferenceFigure(character, overlayName);
     }
 
     /// <summary>
-    /// 给现有动画人物挂载三段式程序战斗人物层。
-    /// 正式 battle PNG 或正式状态帧存在时本层自动让位；缺素材时才显示原创程序人物。
+    /// 给现有动画人物挂载标准稿比例的人物层。
+    /// 旧 CinematicBattleFigureControl 会被禁用，避免两个程序人物同时绘制。
     /// </summary>
-    private static void AttachCinematicFigure(AnimatedBattleCharacterControl character, string overlayName)
+    private static void AttachReferenceFigure(AnimatedBattleCharacterControl character, string overlayName)
     {
-        if (character.GetChildren().OfType<CinematicBattleFigureControl>().Any())
+        foreach (CinematicBattleFigureControl oldFigure in character.GetChildren().OfType<CinematicBattleFigureControl>())
+        {
+            oldFigure.Visible = false;
+            oldFigure.SetProcess(false);
+        }
+
+        if (character.GetChildren().OfType<ReferenceBattleFigureControl>().Any())
         {
             return;
         }
 
-        CinematicBattleFigureControl overlay = new()
+        ReferenceBattleFigureControl overlay = new()
         {
             Name = overlayName,
             Position = Vector2.Zero,
