@@ -14,7 +14,9 @@
 | `guard` | 守卫 | 粉红 |
 | `captain` | 队长/桥头队长职业回退 | 粉红 |
 
-当前分支已经包含真正的 `sheet.png` 正式图集，运行时会优先直接加载 PNG。`sheet.b64` 只保留为同一固定 PNG 的文本后备镜像；只有 PNG/SVG 不存在时，`EmbeddedCharacterArtCatalog` 才会在首次使用时离线解码为普通 `ImageTexture` 并缓存。游戏不会联网、不会生成人物，也不参与任何战斗规则。
+当前分支使用 `sheet.b64` 保存固定 PNG 图集的数据。`EmbeddedCharacterArtCatalog` 只在首次使用时离线解码成普通 `ImageTexture` 并缓存；游戏不会联网、不会在运行时生成人物，也不参与任何战斗规则。
+
+此前通过不可靠的二进制写入通道加入过一批损坏 `sheet.png`，会让 Godot 导入器报 `ERR_FILE_CORRUPT`，因此已经全部移除。以后只有经过 PNG 完整性和 `512×576` 尺寸检查的真实二进制文件才允许作为 `sheet.png` 提交。
 
 ## 统一图集规格
 
@@ -22,10 +24,12 @@
 
 ```text
 assets/characters/<key>/
-├── sheet.png     # 正式主资源，优先读取
+├── sheet.png     # 可选正式 PNG；只有验证完整后才允许提交
 ├── sheet.svg     # 可选统一源图
-└── sheet.b64     # 固定 PNG 的文本后备镜像
+└── sheet.b64     # 当前分支使用的固定 PNG 文本载体
 ```
+
+加载顺序仍兼容 `sheet.png` / `sheet.svg`；两者不存在时自动读取 `sheet.b64`。
 
 图集区域：
 
