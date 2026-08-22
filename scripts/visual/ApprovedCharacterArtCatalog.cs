@@ -5,8 +5,8 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 读取用户已经确认的正式人物设计稿资源。
-/// 正式战斗人物和正式头像只认 approved_battle.webp / approved_portrait.webp；
-/// 缺少正式素材时保持空白，不再回退到旧 battle_ref、battle_v3 或程序绘制人物。
+/// 正式战斗人物和正式头像优先使用 approved_battle.webp / approved_portrait.webp；
+/// 尚未补齐正式稿的角色临时回退到现有安全角色图集，避免战斗或对话中出现纯黑影。
 /// </summary>
 public static class ApprovedCharacterArtCatalog
 {
@@ -22,16 +22,46 @@ public static class ApprovedCharacterArtCatalog
     /// <summary>本次运行已经确认缺少头像素材的键。</summary>
     private static readonly HashSet<string> MissingPortrait = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>返回正式战斗人物；缺少正式美术时返回空。</summary>
+    /// <summary>
+    /// 返回战斗人物。
+    /// 正式全身图优先；未完成正式稿时回退到当前角色已有战斗图集，保证人物始终可见。
+    /// </summary>
     public static Texture2D? TryLoadBattle(UnitModel unit)
     {
-        return TryLoadApprovedTexture(unit, "approved_battle.webp", "battle", BattleCache, MissingBattle);
+        Texture2D? approved = TryLoadApprovedTexture(
+            unit,
+            "approved_battle.webp",
+            "battle",
+            BattleCache,
+            MissingBattle);
+        if (approved is not null)
+        {
+            return approved;
+        }
+
+        // 临时兼容层只在 approved_battle.webp 缺失时生效；正式图一旦补齐会自动覆盖这一回退。
+        return CharacterAssetResolver.TryLoad(unit, CharacterArtSlot.Battle);
     }
 
-    /// <summary>返回正式对话头像；缺少正式美术时返回空。</summary>
+    /// <summary>
+    /// 返回人物头像。
+    /// 正式头像优先；未完成正式稿时回退到现有角色图集头像，避免对话框出现黑块或空脸。
+    /// </summary>
     public static Texture2D? TryLoadPortrait(UnitModel unit)
     {
-        return TryLoadApprovedTexture(unit, "approved_portrait.webp", "portrait", PortraitCache, MissingPortrait);
+        Texture2D? approved = TryLoadApprovedTexture(
+            unit,
+            "approved_portrait.webp",
+            "portrait",
+            PortraitCache,
+            MissingPortrait);
+        if (approved is not null)
+        {
+            return approved;
+        }
+
+        // 战斗 HUD 与章节对话共用这一条回退，确保同一角色在两个界面中都不会变成黑影。
+        return CharacterAssetResolver.TryLoad(unit, CharacterArtSlot.Portrait);
     }
 
     /// <summary>
@@ -78,7 +108,7 @@ public static class ApprovedCharacterArtCatalog
             if (error != Error.Ok || image.GetWidth() <= 0 || image.GetHeight() <= 0)
             {
                 missing.Add(cacheKey);
-                GD.PushWarning($"正式人物资源 {path} 解码失败：{error}");
+                GD.PushWarning($"正式人物资源 {path} 解码失败，将临时使用安全角色图集：{error}");
                 return null;
             }
 
@@ -89,7 +119,7 @@ public static class ApprovedCharacterArtCatalog
         catch (Exception exception)
         {
             missing.Add(cacheKey);
-            GD.PushWarning($"正式人物资源 {path} 读取失败：{exception.Message}");
+            GD.PushWarning($"正式人物资源 {path} 读取失败，将临时使用安全角色图集：{exception.Message}");
             return null;
         }
     }
