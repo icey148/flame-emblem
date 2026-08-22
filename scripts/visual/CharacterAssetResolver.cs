@@ -14,7 +14,7 @@ public enum CharacterArtSlot
 /// <summary>
 /// 统一解析人物正式美术资源。
 /// 解析顺序兼容旧独立 PNG，也支持新的 512×576 统一角色图集；
-/// 统一图集可以是直接的 sheet.png / sheet.svg，也可以是仓库中的 sheet.b64 PNG 文本资源。
+/// 当前统一图集固定从 sheet.b64 读取，避免 Godot 旧导入缓存继续访问已经删除的损坏 sheet.png。
 /// </summary>
 public static class CharacterAssetResolver
 {
@@ -319,7 +319,7 @@ public static class CharacterAssetResolver
 
     /// <summary>
     /// 加载一个完整角色图集。
-    /// 未来直接加入 sheet.png / sheet.svg 时会自动优先使用；当前仓库则回退到固定 Base64 PNG 文本资源。
+    /// 当前版本只读取已经验证可用的 sheet.b64，主动绕开曾经损坏的 sheet.png 及其 Godot 导入缓存。
     /// </summary>
     private static Texture2D? TryLoadFullSheet(string key)
     {
@@ -329,9 +329,9 @@ public static class CharacterAssetResolver
             return cachedTexture;
         }
 
-        Texture2D? texture = TryLoadDirectPath($"res://assets/characters/{key}/sheet.png")
-                            ?? TryLoadDirectPath($"res://assets/characters/{key}/sheet.svg")
-                            ?? EmbeddedCharacterArtCatalog.TryLoadSheet(key);
+        // 不再探测 sheet.png / sheet.svg：旧导入缓存可能让 ResourceLoader.Exists 错误返回 true，
+        // 随后的 GD.Load 会持续产生 ERR_FILE_CORRUPT。固定走离线 Base64 图集可彻底避开该路径。
+        Texture2D? texture = EmbeddedCharacterArtCatalog.TryLoadSheet(key);
         if (texture is not null)
         {
             TextureCache[cacheKey] = texture;
