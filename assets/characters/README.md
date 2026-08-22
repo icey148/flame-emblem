@@ -14,7 +14,7 @@
 | `guard` | 守卫 | 粉红 |
 | `captain` | 队长/桥头队长职业回退 | 粉红 |
 
-当前仓库使用 `sheet.b64` 保存同一张 PNG 的 Base64 文本数据，这是为了兼容当前文本写入通道。运行时由 `EmbeddedCharacterArtCatalog` 在首次使用时离线解码成普通 `ImageTexture` 并缓存；游戏不会联网、不会生成人物，也不参与任何战斗规则。以后直接加入 `sheet.png` 时，解析器会自动优先读取 PNG。
+当前分支已经包含真正的 `sheet.png` 正式图集，运行时会优先直接加载 PNG。`sheet.b64` 只保留为同一固定 PNG 的文本后备镜像；只有 PNG/SVG 不存在时，`EmbeddedCharacterArtCatalog` 才会在首次使用时离线解码为普通 `ImageTexture` 并缓存。游戏不会联网、不会生成人物，也不参与任何战斗规则。
 
 ## 统一图集规格
 
@@ -22,9 +22,9 @@
 
 ```text
 assets/characters/<key>/
-├── sheet.png     # 如果存在，优先使用的正式统一 PNG
+├── sheet.png     # 正式主资源，优先读取
 ├── sheet.svg     # 可选统一源图
-└── sheet.b64     # 当前仓库使用的统一 PNG 文本载体
+└── sheet.b64     # 固定 PNG 的文本后备镜像
 ```
 
 图集区域：
