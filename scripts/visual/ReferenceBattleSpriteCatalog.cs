@@ -4,25 +4,25 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 加载战斗标准稿专用的固定像素贴图。
-/// 每张人物贴图都是仓库内真实的 80×75 透明 PNG；运行时只加载固定资源，
-/// 不联网、不生成新图，也不参与任何命中、伤害或回合规则。
+/// 加载战斗标准界面专用的固定 96×96 像素人物。
+/// 每名角色使用仓库内的小型 Base64 PNG 文本资源，运行时只做确定性的 PNG 解码与缓存；
+/// 不联网、不生成角色，也不参与命中、伤害、反击、经验或回合规则。
 /// </summary>
 public static class ReferenceBattleSpriteCatalog
 {
-    /// <summary>标准稿人物逻辑宽度。</summary>
-    public const int SpriteWidth = 80;
+    /// <summary>固定战斗人物源图宽度。</summary>
+    public const int SpriteWidth = 96;
 
-    /// <summary>标准稿人物逻辑高度。</summary>
-    public const int SpriteHeight = 75;
+    /// <summary>固定战斗人物源图高度。</summary>
+    public const int SpriteHeight = 96;
 
-    /// <summary>已经成功加载的人物贴图缓存。</summary>
+    /// <summary>已经成功解码的人物纹理缓存。</summary>
     private static readonly Dictionary<string, Texture2D> Cache = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>已经确认缺失或损坏的键，避免绘制循环重复访问同一路径。</summary>
+    /// <summary>本次运行已经确认失败的素材键，避免绘制循环重复刷同一条错误。</summary>
     private static readonly HashSet<string> FailedKeys = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>根据人物 ID / 职业 ID 返回标准稿战斗贴图。</summary>
+    /// <summary>根据稳定人物 ID 或敌军职业 ID 返回固定战斗人物纹理。</summary>
     public static Texture2D? TryLoad(UnitModel unit)
     {
         string key = ResolveKey(unit);
@@ -36,39 +36,49 @@ public static class ReferenceBattleSpriteCatalog
             return null;
         }
 
-        string path = $"res://assets/characters/{key}/battle_ref.png";
-        if (!ResourceLoader.Exists(path))
+        string path = $"res://assets/characters/{key}/battle_v3.b64";
+        if (!Godot.FileAccess.FileExists(path))
         {
             FailedKeys.Add(key);
+            GD.PushWarning($"缺少固定战斗人物资源：{path}");
             return null;
         }
 
         try
         {
-            // 这批 battle_ref.png 通过 Git blob 二进制提交，不经过旧的 Base64 文本载体，
-            // 因此直接交给 Godot 资源系统导入并保持最近邻显示即可。
-            Texture2D? texture = GD.Load<Texture2D>(path);
-            if (texture is null || texture.GetWidth() != SpriteWidth || texture.GetHeight() != SpriteHeight)
+            // battle_v3.b64 体积很小，避免此前大型整张图集经过文本通道时发生截断。
+            string encoded = Godot.FileAccess.GetFileAsString(path).Trim();
+            if (string.IsNullOrEmpty(encoded))
             {
                 FailedKeys.Add(key);
-                GD.PushWarning($"标准战斗贴图 {path} 不是有效的 {SpriteWidth}×{SpriteHeight} PNG，暂时使用程序兜底人物。");
                 return null;
             }
 
+            byte[] pngBytes = Convert.FromBase64String(encoded);
+            Image image = new();
+            Error error = image.LoadPngFromBuffer(pngBytes);
+            if (error != Error.Ok || image.GetWidth() != SpriteWidth || image.GetHeight() != SpriteHeight)
+            {
+                FailedKeys.Add(key);
+                GD.PushWarning($"固定战斗人物 {key} 解码失败或尺寸不是 {SpriteWidth}×{SpriteHeight}：{error}");
+                return null;
+            }
+
+            ImageTexture texture = ImageTexture.CreateFromImage(image);
             Cache[key] = texture;
             return texture;
         }
         catch (Exception exception)
         {
             FailedKeys.Add(key);
-            GD.PushWarning($"标准战斗贴图 {path} 读取失败：{exception.Message}");
+            GD.PushWarning($"固定战斗人物 {key} 读取失败：{exception.Message}");
             return null;
         }
     }
 
     /// <summary>
-    /// 四名主角按稳定人物 ID 命中个人贴图；敌军按职业 ID 命中通用职业贴图。
-    /// 这样 enemy_01、boss 等运行时实例名不会导致正式人物丢失。
+    /// 四名主角使用个人 ID；敌军实例使用职业 ID。
+    /// 因此 enemy_01、road_enemy_04、boss 等实例名称不会让正式人物掉回占位图。
     /// </summary>
     private static string ResolveKey(UnitModel unit)
     {
