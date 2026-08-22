@@ -60,7 +60,7 @@ public partial class BattleSpriteFigureControl : Control
         QueueRedraw();
     }
 
-    /// <summary>绘制当前人物的真实 PNG；正式贴图缺失时保持空白并输出一次警告，不再退回方块人。</summary>
+    /// <summary>绘制当前人物的真实 PNG；正式贴图缺失时保持空白，不再退回方块人。</summary>
     public override void _Draw()
     {
         UnitModel? unit = ReadUnit();
@@ -82,7 +82,7 @@ public partial class BattleSpriteFigureControl : Control
         float opacity = ResolveOpacity(state, elapsed);
 
         DrawGround(unit, motion, opacity);
-        DrawSprite(texture, motion, opacity);
+        DrawSprite(unit, texture, motion, opacity);
     }
 
     /// <summary>绘制低矮阴影与阵营细线，让透明贴图在纯黑背景上仍然有明确落脚点。</summary>
@@ -101,13 +101,16 @@ public partial class BattleSpriteFigureControl : Control
 
     /// <summary>
     /// 绘制 80×75 正式贴图。
-    /// 所有源图统一朝左：右侧我方直接使用原图，左侧敌军水平镜像后朝右，双方始终面对彼此。
+    /// 四名主角、守卫和队长的源图朝左，因此位于左侧时需要镜像朝右；
+    /// 掠夺者源图直接来自确认标准稿，本身已经朝右，放在左侧时保持原方向即可。
     /// </summary>
-    private void DrawSprite(Texture2D texture, Vector2 motion, float opacity)
+    private void DrawSprite(UnitModel unit, Texture2D texture, Vector2 motion, float opacity)
     {
         Rect2 target = new(DrawOrigin + motion, DrawSize);
         Color modulate = new(1, 1, 1, opacity);
-        bool mirrorForLeftSide = _source?.MirrorHorizontally == false;
+        bool isLeftSide = _source?.MirrorHorizontally == false;
+        bool raiderAlreadyFacesRight = unit.ClassDefinition.Id.Equals("raider", StringComparison.OrdinalIgnoreCase);
+        bool mirrorForLeftSide = isLeftSide && !raiderAlreadyFacesRight;
 
         if (mirrorForLeftSide)
         {
