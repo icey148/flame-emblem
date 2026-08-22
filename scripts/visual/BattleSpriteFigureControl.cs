@@ -6,12 +6,12 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 标准战斗界面真正显示的人物层。
-/// 本层只绘制仓库内固定的透明像素 PNG，并读取旧人物节点已经存在的单位与动作计时；
-/// 不重新计算命中、伤害、反击、经验或回合规则，也不在运行时生成人物美术。
+/// 本层只绘制仓库内固定的 96×96 透明像素人物，并读取隐藏状态节点的单位与动作时间；
+/// 旧程序方块人和旧 battle_ref.png 都不会参与最终绘制。
 /// </summary>
 public partial class BattleSpriteFigureControl : Control
 {
-    /// <summary>只负责保存人物和动作时间线的隐藏状态节点。</summary>
+    /// <summary>只负责保存人物与动作时间线的隐藏状态节点。</summary>
     private AnimatedBattleCharacterControl? _source;
 
     /// <summary>读取隐藏状态节点中的当前人物。</summary>
@@ -23,14 +23,17 @@ public partial class BattleSpriteFigureControl : Control
     /// <summary>读取隐藏状态节点中的动作播放时间。</summary>
     private FieldInfo? _elapsedField;
 
-    /// <summary>80×75 原图先整数放大 4 倍，再由外层 0.75 缩放，最终每个源像素严格显示为 3×3。</summary>
-    private static readonly Vector2 DrawSize = new(320, 300);
+    /// <summary>
+    /// 96×96 源图固定整数放大 4 倍，再由外层人物节点使用 0.75 倍缩放；
+    /// 最终每个源像素严格显示为 3×3 屏幕像素。
+    /// </summary>
+    private static readonly Vector2 DrawSize = new(384, 384);
 
     /// <summary>
-    /// 贴图在 420×390 人物控件中的整数放大位置。
-    /// y=76 配合人物节点 y=23 与 0.75 外层倍率，使贴图脚底准确落在屏幕 y=305 的状态框上沿。
+    /// 420 宽人物区域左右各留 18 个本地像素；纵向从 0 开始，
+    /// 这样 96px 图底部经过 4× 和 0.75× 后与 y=305 状态框上沿对齐。
     /// </summary>
-    private static readonly Vector2 DrawOrigin = new(50, 76);
+    private static readonly Vector2 DrawOrigin = new(18, 0);
 
     /// <summary>物理攻击时间与现有战斗时间线保持一致。</summary>
     private const float AttackDuration = 0.34f;
@@ -38,7 +41,7 @@ public partial class BattleSpriteFigureControl : Control
     /// <summary>施法时间与现有战斗时间线保持一致。</summary>
     private const float CastDuration = 0.50f;
 
-    /// <summary>绑定隐藏的状态节点，只读取它的单位与时间线。</summary>
+    /// <summary>绑定隐藏的战斗状态节点，只读取它的单位与时间线。</summary>
     public void Bind(AnimatedBattleCharacterControl source)
     {
         _source = source;
@@ -54,13 +57,13 @@ public partial class BattleSpriteFigureControl : Control
         QueueRedraw();
     }
 
-    /// <summary>原战斗节点推进时间线时，本层只请求重新绘制贴图。</summary>
+    /// <summary>隐藏状态节点推进时间线时，本层只请求重新绘制固定贴图。</summary>
     public override void _Process(double delta)
     {
         QueueRedraw();
     }
 
-    /// <summary>绘制当前人物的真实 PNG；正式贴图缺失时保持空白，不再退回方块人。</summary>
+    /// <summary>绘制当前人物；资源缺失时保持空白，不再出现废弃的程序方块人。</summary>
     public override void _Draw()
     {
         UnitModel? unit = ReadUnit();
@@ -72,7 +75,6 @@ public partial class BattleSpriteFigureControl : Control
         Texture2D? texture = ReferenceBattleSpriteCatalog.TryLoad(unit);
         if (texture is null)
         {
-            // 正式战斗画面宁可暂时缺人物，也不再显示已经废弃的矩形拼接角色。
             return;
         }
 
@@ -82,16 +84,16 @@ public partial class BattleSpriteFigureControl : Control
         float opacity = ResolveOpacity(state, elapsed);
 
         DrawGround(unit, motion, opacity);
-        DrawSprite(unit, texture, motion, opacity);
+        DrawSprite(texture, motion, opacity);
     }
 
-    /// <summary>绘制低矮阴影与阵营细线，让透明贴图在纯黑背景上仍然有明确落脚点。</summary>
+    /// <summary>绘制低矮阴影和阵营细线，使人物在纯黑背景上有明确落脚点。</summary>
     private void DrawGround(UnitModel unit, Vector2 motion, float opacity)
     {
-        Vector2 groundOrigin = DrawOrigin + motion + new Vector2(32, 292);
+        Vector2 groundOrigin = DrawOrigin + motion + new Vector2(64, 372);
         DrawRect(
             new Rect2(groundOrigin, new Vector2(256, 8)),
-            new Color(0.04f, 0.04f, 0.06f, 0.48f * opacity),
+            new Color(0.04f, 0.04f, 0.06f, 0.44f * opacity),
             true);
         DrawRect(
             new Rect2(groundOrigin + new Vector2(56, 8), new Vector2(144, 4)),
@@ -100,21 +102,18 @@ public partial class BattleSpriteFigureControl : Control
     }
 
     /// <summary>
-    /// 绘制 80×75 正式贴图。
-    /// 四名主角、守卫和队长的源图朝左，因此位于左侧时需要镜像朝右；
-    /// 掠夺者源图直接来自确认标准稿，本身已经朝右，放在左侧时保持原方向即可。
+    /// 绘制固定 96×96 人物。
+    /// 所有源图统一朝右：左侧敌军保持原方向，右侧我方水平镜像后朝左。
     /// </summary>
-    private void DrawSprite(UnitModel unit, Texture2D texture, Vector2 motion, float opacity)
+    private void DrawSprite(Texture2D texture, Vector2 motion, float opacity)
     {
         Rect2 target = new(DrawOrigin + motion, DrawSize);
         Color modulate = new(1, 1, 1, opacity);
-        bool isLeftSide = _source?.MirrorHorizontally == false;
-        bool raiderAlreadyFacesRight = unit.ClassDefinition.Id.Equals("raider", StringComparison.OrdinalIgnoreCase);
-        bool mirrorForLeftSide = isLeftSide && !raiderAlreadyFacesRight;
+        bool mirrorForRightSide = _source?.MirrorHorizontally == true;
 
-        if (mirrorForLeftSide)
+        if (mirrorForRightSide)
         {
-            // 420 宽控件左右各留 50 像素，围绕控件右边界镜像后目标区域仍保持完全对称。
+            // 围绕 420px 人物区域右边界镜像；18 + 384 + 18 正好保持左右留白对称。
             DrawSetTransform(new Vector2(Size.X, 0), 0.0f, new Vector2(-1, 1));
             DrawTextureRect(texture, target, false, modulate);
             DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
@@ -125,8 +124,7 @@ public partial class BattleSpriteFigureControl : Control
     }
 
     /// <summary>
-    /// 正式贴图已经包含完整身体、护甲、披风和武器，因此动作只做像素安全的整体位移。
-    /// 位移始终锁到 4 个本地像素，经过 0.75 倍后仍然是整数 3 屏幕像素，不会发糊。
+    /// 固定贴图不旋转、不做非整数缩放，只用像素安全的整体位移表现蓄势、攻击、闪避和受击。
     /// </summary>
     private Vector2 ResolveMotion(CharacterAnimationState state, float elapsed)
     {
@@ -135,55 +133,53 @@ public partial class BattleSpriteFigureControl : Control
             return Vector2.Zero;
         }
 
-        // 左侧人物向右攻击，右侧人物向左攻击。
         float direction = _source.MirrorHorizontally ? -1.0f : 1.0f;
         Vector2 motion = state switch
         {
             CharacterAnimationState.Attack => ResolveAttackMotion(elapsed, direction),
             CharacterAnimationState.Cast => ResolveCastMotion(elapsed),
             CharacterAnimationState.Dodge => new Vector2(
-                -direction * Mathf.Sin(Mathf.Clamp(elapsed / 0.28f, 0.0f, 1.0f) * Mathf.Pi) * 24.0f,
+                -direction * Mathf.Sin(Mathf.Clamp(elapsed / 0.28f, 0.0f, 1.0f) * Mathf.Pi) * 28.0f,
                 0),
             CharacterAnimationState.Hit => new Vector2(
-                -direction * Mathf.Sin(Mathf.Clamp(elapsed / 0.24f, 0.0f, 1.0f) * Mathf.Pi) * 8.0f,
+                -direction * Mathf.Sin(Mathf.Clamp(elapsed / 0.24f, 0.0f, 1.0f) * Mathf.Pi) * 12.0f,
                 0),
             CharacterAnimationState.Defeat => new Vector2(
                 -direction * Mathf.Clamp(elapsed / 0.90f, 0.0f, 1.0f) * 8.0f,
-                Mathf.Clamp(elapsed / 0.90f, 0.0f, 1.0f) * 24.0f),
+                Mathf.Clamp(elapsed / 0.90f, 0.0f, 1.0f) * 28.0f),
             _ => Vector2.Zero
         };
 
         return SnapToLogicalPixel(motion);
     }
 
-    /// <summary>攻击使用轻微后撤、快速前冲、回到原位三段，不旋转像素贴图。</summary>
+    /// <summary>攻击使用短后撤、快速前冲、收势三段，保持人物像素轮廓完整。</summary>
     private static Vector2 ResolveAttackMotion(float elapsed, float direction)
     {
         float t = Mathf.Clamp(elapsed / AttackDuration, 0.0f, 1.0f);
-        if (t < 0.30f)
+        if (t < 0.28f)
         {
-            return new Vector2(-direction * (t / 0.30f) * 8.0f, 0);
+            return new Vector2(-direction * (t / 0.28f) * 8.0f, 0);
         }
 
-        if (t < 0.62f)
+        if (t < 0.60f)
         {
-            float strike = (t - 0.30f) / 0.32f;
-            return new Vector2(direction * strike * 28.0f, 0);
+            float strike = (t - 0.28f) / 0.32f;
+            return new Vector2(direction * strike * 32.0f, 0);
         }
 
-        float recover = (t - 0.62f) / 0.38f;
-        return new Vector2(direction * (1.0f - recover) * 28.0f, 0);
+        float recover = (t - 0.60f) / 0.40f;
+        return new Vector2(direction * (1.0f - recover) * 32.0f, 0);
     }
 
-    /// <summary>施法只做轻微上浮，避免对固定像素贴图进行非整数旋转或缩放。</summary>
+    /// <summary>施法只做轻微整数像素上浮，不改变贴图比例。</summary>
     private static Vector2 ResolveCastMotion(float elapsed)
     {
         float t = Mathf.Clamp(elapsed / CastDuration, 0.0f, 1.0f);
-        float lift = Mathf.Sin(t * Mathf.Pi) * 8.0f;
-        return new Vector2(0, -lift);
+        return new Vector2(0, -Mathf.Sin(t * Mathf.Pi) * 8.0f);
     }
 
-    /// <summary>倒下时逐步淡出；其余动作保持完全不透明。</summary>
+    /// <summary>倒下时淡出；其他动作保持完全不透明。</summary>
     private static float ResolveOpacity(CharacterAnimationState state, float elapsed)
     {
         if (state != CharacterAnimationState.Defeat)
@@ -195,7 +191,7 @@ public partial class BattleSpriteFigureControl : Control
         return Mathf.Lerp(1.0f, 0.12f, t);
     }
 
-    /// <summary>锁到 4 像素逻辑栅格，外层 0.75 倍后得到整数 3 像素位移。</summary>
+    /// <summary>锁到 4 个本地像素，外层 0.75 倍后得到严格的 3 屏幕像素位移。</summary>
     private static Vector2 SnapToLogicalPixel(Vector2 value)
     {
         return new Vector2(
@@ -225,7 +221,7 @@ public partial class BattleSpriteFigureControl : Control
             : 0.0f;
     }
 
-    /// <summary>统一套用人物动作透明度。</summary>
+    /// <summary>统一套用动作透明度。</summary>
     private static Color Fade(Color color, float opacity)
     {
         return new Color(color.R, color.G, color.B, color.A * opacity);
