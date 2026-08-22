@@ -311,21 +311,8 @@ public partial class RetroBattleStatusHudControl : Control
             false);
     }
 
-    /// <summary>绘制单侧面板的外金框、内暗金框和中央接缝强调线。</summary>
-    private static void DrawPanelBorders(Rect2 panel)
-    {
-        DrawStaticRect(panel, Gold, 3.0f);
-        DrawStaticRect(panel.Grow(-5), Gold.Darkened(0.45f), 1.0f);
-    }
-
-    /// <summary>静态辅助方法通过当前 CanvasItem 的绘图接口不可直接调用，因此本方法仅保留语义占位。</summary>
-    private static void DrawStaticRect(Rect2 panel, Color color, float width)
-    {
-        // 该方法的实际绘制由 DrawPanelBorders 的实例重载完成；这里不会被调用。
-    }
-
-    /// <summary>实例版本负责真正绘制面板双层边框。</summary>
-    private void DrawPanelBordersInstance(Rect2 panel)
+    /// <summary>绘制单侧面板的外金框与内暗金框。</summary>
+    private void DrawPanelBorders(Rect2 panel)
     {
         DrawRect(panel, Gold, false, 3.0f);
         DrawRect(panel.Grow(-5), Gold.Darkened(0.45f), false, 1.0f);
