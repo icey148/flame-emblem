@@ -1,129 +1,99 @@
-# Character Art Slots
+# 人物美术资源
 
-人物美术使用统一目录约定。正式素材不存在时，游戏会自动使用程序绘制占位人物，不会因为缺图中断运行。
+人物美术统一走 `CharacterAssetResolver`。当前四名主角和三种敌军职业都已经提供正式原创统一图集；只有素材确实缺失时才会回退到程序绘制人物。
 
-## 正式我方角色生产表
+## 当前已完成的正式图集
 
-四名当前我方角色已经有固定的原创像素美术生产规范：
+| 素材键 | 游戏角色/职业 | 主色 |
+| --- | --- | --- |
+| `adrian` | 亚德里安 | 深蓝 |
+| `celine` | 塞琳 | 深蓝 |
+| `rowan` | 罗文 | 深蓝 |
+| `mira` | 米拉 | 深蓝 |
+| `raider` | 掠夺者 | 粉红 |
+| `guard` | 守卫 | 粉红 |
+| `captain` | 队长/桥头队长职业回退 | 粉红 |
 
-- 总生产表：`docs/player-character-production-sheet.md`
-- Adrian：`assets/characters/adrian/README.md`
-- Celine：`assets/characters/celine/README.md`
-- Rowan：`assets/characters/rowan/README.md`
-- Mira：`assets/characters/mira/README.md`
+当前仓库使用 `sheet.b64` 保存同一张 PNG 的 Base64 文本数据，这是为了兼容当前文本写入通道。运行时由 `EmbeddedCharacterArtCatalog` 在首次使用时离线解码成普通 `ImageTexture` 并缓存；游戏不会联网、不会生成人物，也不参与任何战斗规则。以后直接加入 `sheet.png` 时，解析器会自动优先读取 PNG。
 
-当前正式目标规格：
+## 统一图集规格
 
-- 地图人物：32×32 px，脚底基准线 y=28
-- 战斗人物：96×96 px，脚底基准线建议 y=84
-- 头像：64×64 px
-- 地图每人 20 帧：四方向 Idle 2 帧 + Walk 3 帧
-- 战斗基础：Idle 2 / Attack 4 / Hit 3 / Dodge 3 / Defeat 4
-- Mira 额外：Cast 5 帧
-
-角色造型、像素帧和细节保持原创；目标是统一古典日式战棋幻想的修长比例和职业辨识，不直接复制既有商业游戏角色素材。
-
-## 单张兼容素材
-
-每个人物或职业仍然可以使用最简单的单张素材：
+每套正式图集严格为 `512×576 px`。
 
 ```text
 assets/characters/<key>/
-├── map.png       # 单张地图小人兼容素材
-├── portrait.png  # 人物详情头像/半身像
-└── battle.png    # 独立战斗演出大图兼容素材
+├── sheet.png     # 如果存在，优先使用的正式统一 PNG
+├── sheet.svg     # 可选统一源图
+└── sheet.b64     # 当前仓库使用的统一 PNG 文本载体
 ```
 
-## 地图多帧像素动画
+图集区域：
 
-如果存在多帧地图素材，游戏会优先使用序列帧，不再使用 `map.png` 的单图移动回退效果。
+- 头像：左上角 `64×64`
+- 地图人物：`32×32` 固定格，从 `y=64` 开始
+- 战斗人物：`96×96` 固定格，从 `x=112` 开始
 
-```text
-assets/characters/<key>/map/
-├── idle_down_0.png
-├── idle_down_1.png
-├── idle_up_0.png
-├── idle_up_1.png
-├── idle_left_0.png
-├── idle_left_1.png
-├── idle_right_0.png
-├── idle_right_1.png
-├── walk_down_0.png
-├── walk_down_1.png
-├── walk_down_2.png
-├── walk_up_0.png
-├── walk_up_1.png
-├── walk_up_2.png
-├── walk_left_0.png
-├── walk_left_1.png
-├── walk_left_2.png
-├── walk_right_0.png
-├── walk_right_1.png
-└── walk_right_2.png
-```
+地图方向顺序固定为：
 
-地图方向名固定为：`down` / `up` / `left` / `right`。
+1. `down`
+2. `left`
+3. `right`
+4. `up`
 
-## 独立战斗多帧动画
+地图帧：
 
-战斗演出使用独立的 `battle/` 目录，不需要四方向帧。左/右站位由游戏控制，右侧人物会自动水平镜像以面对对手。
+- `Idle`：每方向 2 帧
+- `Walk`：每方向 3 帧
 
-```text
-assets/characters/<key>/battle/
-├── idle_0.png
-├── idle_1.png
-├── attack_0.png
-├── attack_1.png
-├── attack_2.png
-├── attack_3.png
-├── hit_0.png
-├── hit_1.png
-├── hit_2.png
-├── dodge_0.png
-├── dodge_1.png
-├── dodge_2.png
-├── defeat_0.png
-├── defeat_1.png
-├── defeat_2.png
-├── defeat_3.png
-├── cast_0.png
-├── cast_1.png
-├── cast_2.png
-├── cast_3.png
-└── cast_4.png
-```
+战斗帧：
 
-当前战斗状态机会根据真实结算结果自动选择：
+- `Idle`：2 帧
+- `Attack`：4 帧
+- `Cast`：4 帧
+- `Hit`：2 帧
+- `Dodge`：2 帧
+- `Defeat`：3 帧
 
-- `attack`：物理攻击
-- `cast`：魔法施放
-- `hit`：攻击命中后受击
-- `dodge`：攻击未命中时闪避
-- `defeat`：这一击实际把目标 HP 降到 0 时倒下
-- `idle`：攻击之间的待机状态
+右侧战斗人物由游戏自动水平镜像，不需要再制作一套反方向帧。
 
-必杀不要求单独准备一套人物帧：当前会继续使用攻击动作，并叠加必杀闪光和伤害提示。以后如需专属必杀动作，可以在状态枚举中继续扩展。
+## 战斗画面基准
 
-主动攻击、反击和速度追击会按照 `CombatResolver` 的真实攻击顺序排队播放；演出层不会重新掷命中或重新计算伤害。
+正式 96×96 战斗帧按 4× 绘制，再由战斗人物控件整体使用 `0.75×`，最终得到严格的 3× 逻辑像素显示。角色脚底统一按图集逻辑 `y≈91` 校准到战斗状态框的 `y=305` 上沿，相关位置只从 `ReferenceBattleLayout` 读取。
 
-## 帧命名规则
-
-所有帧编号必须从 `0` 连续递增。程序遇到第一张不存在的编号后，会把前面的连续文件视为完整动画。
-
-当前统一状态名：
-
-- `idle`：待机
-- `walk`：移动
-- `attack`：攻击
-- `hit`：受击
-- `dodge`：闪避
-- `defeat`：倒下
-- `cast`：施法
+物理攻击时间线为约 `0.34s`，施法蓄力为约 `0.50s`。4 帧攻击/施法素材在当前播放速度下都能在命中阶段前显示到末帧；受击、闪避和倒下继续由同一战斗结果时间线驱动，不重新计算命中或伤害。
 
 ## 查找优先级
 
-1. 人物实例 ID，例如 `adrian`、`mira`
-2. 职业 ID，例如 `mage`、`soldier`
+每个候选素材键按以下顺序寻找：
+
+1. 人物/实例 ID，例如 `adrian`、`mira`
+2. 职业 ID，例如 `raider`、`guard`、`captain`
 3. 阵营默认目录：`player_default` / `enemy_default`
 
-正式原创 PNG/像素序列帧加入后，不需要修改移动、战斗或角色数值代码。
+因此普通敌军即使战场实例 ID 是 `enemy_01`、`road_enemy_04` 或 `boss`，仍会通过职业 ID 自动找到对应正式图集。
+
+同一个候选键内部仍兼容旧独立 PNG/序列帧；这些文件如果存在，会作为明确的人工覆盖素材。没有旧覆盖文件时使用统一图集。
+
+## 旧独立素材兼容
+
+项目仍支持旧路径，方便以后针对某个动作单独覆盖：
+
+```text
+assets/characters/<key>/
+├── map.png
+├── portrait.png
+├── battle.png
+├── map/
+│   ├── idle_down_0.png
+│   └── ...
+└── battle/
+    ├── idle_0.png
+    ├── attack_0.png
+    └── ...
+```
+
+所有独立序列帧编号必须从 `0` 连续递增。遇到第一张缺失编号后，解析器会把此前的连续文件视为完整动画。
+
+## 原创边界
+
+角色比例、职业轮廓、盔甲层级、披风结构和战斗姿态保持统一的古典日式战棋视觉语言；脸、发型、装备细节、武器造型、徽记和角色身份均使用本项目原创设计，不直接复制商业游戏正式角色素材。
