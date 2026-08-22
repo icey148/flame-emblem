@@ -4,8 +4,7 @@ using System.Reflection;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 给标准稿式战斗界面执行最终构图校正。
-/// 所有位置与尺寸统一读取 ReferenceBattleLayout，避免战斗协调器、HUD 和表现层分别写死坐标造成再次漂移。
+/// 把动态创建的战斗窗口锁定到用户最终确认的定稿图构图。
 /// 本协调器只调整表现节点，不参与战斗结算、目标选择或回合推进。
 /// </summary>
 public partial class BattlePresentationPolishCoordinator : Node
@@ -13,25 +12,25 @@ public partial class BattlePresentationPolishCoordinator : Node
     /// <summary>现有战斗动画协调器。</summary>
     private RetroBattleAnimationCoordinator? _battleCoordinator;
 
-    /// <summary>战斗动画协调器的全屏遮罩字段。</summary>
+    /// <summary>战斗窗口全屏根节点字段。</summary>
     private FieldInfo? _blockerField;
 
-    /// <summary>左侧战斗人物字段。</summary>
+    /// <summary>左侧隐藏状态人物字段。</summary>
     private FieldInfo? _leftCharacterField;
 
-    /// <summary>右侧战斗人物字段。</summary>
+    /// <summary>右侧隐藏状态人物字段。</summary>
     private FieldInfo? _rightCharacterField;
 
-    /// <summary>中央战斗结果文字字段。</summary>
+    /// <summary>中央结果文字字段。</summary>
     private FieldInfo? _resultLabelField;
 
-    /// <summary>底部双状态框字段。</summary>
+    /// <summary>底部状态 HUD 字段。</summary>
     private FieldInfo? _statusHudField;
 
-    /// <summary>战斗命中与武器特效字段。</summary>
+    /// <summary>战斗特效字段。</summary>
     private FieldInfo? _effectControlField;
 
-    /// <summary>是否已经完成一次性表现整理。</summary>
+    /// <summary>是否已经完成一次性整理。</summary>
     private bool _applied;
 
     /// <summary>缓存现有战斗表现字段。</summary>
@@ -56,7 +55,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         _effectControlField = type.GetField("_effectControl", members);
     }
 
-    /// <summary>等待动态战斗 UI 创建完成后执行一次最终像素整理。</summary>
+    /// <summary>等待动态战斗 UI 创建完成后执行一次最终整理。</summary>
     public override void _Process(double delta)
     {
         if (_applied || _battleCoordinator is null)
@@ -71,7 +70,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
     }
 
-    /// <summary>把战斗画面锁到已经确认的唯一构图规格与像素安全参数。</summary>
+    /// <summary>把人物、HUD、结果框和特效层放到最终定稿位置。</summary>
     private bool TryApplyPolish()
     {
         if (_battleCoordinator is null ||
@@ -80,7 +79,6 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 正式规格使用纯黑底，不插入蓝灰舞台、地形图层或渐变。
         ColorRect? fullBackdrop = blocker.GetChildren().OfType<ColorRect>().FirstOrDefault();
         if (fullBackdrop is not null)
         {
@@ -94,24 +92,21 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 80×75 正式 PNG 在人物层内整数放大 4 倍，人物层再以 0.75 倍显示，最终每个源像素严格成为 3×3。
-        // x 加 0.5 用来让 320 宽贴图经过 0.75 倍后落在整数屏幕像素；y 保持整数以让脚底准确落在 y=305。
         ConfigureBattleCharacter(
             leftCharacter,
-            ReferenceBattleLayout.LeftCharacterPosition + new Vector2(0.5f, 0.0f),
+            ReferenceBattleLayout.LeftCharacterPosition,
             false,
             "LeftBattleSpriteFigure");
         ConfigureBattleCharacter(
             rightCharacter,
-            ReferenceBattleLayout.RightCharacterPosition + new Vector2(0.5f, 0.0f),
+            ReferenceBattleLayout.RightCharacterPosition,
             true,
             "RightBattleSpriteFigure");
 
-        // 双状态框、人物区域和中央信息框全部读取同一份规格。
         statusHud.Position = ReferenceBattleLayout.StatusHudPosition;
         statusHud.Size = ReferenceBattleLayout.StatusHudSize;
         statusHud.ZIndex = 30;
-        statusHud.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
+        statusHud.TextureFilter = CanvasItem.TextureFilterEnum.Linear;
 
         if (_effectControlField?.GetValue(_battleCoordinator) is RetroBattleEffectControl effectControl)
         {
@@ -130,22 +125,40 @@ public partial class BattlePresentationPolishCoordinator : Node
                 resultPanel.Position = ReferenceBattleLayout.ResultPanelPosition;
                 resultPanel.Size = ReferenceBattleLayout.ResultPanelSize;
                 resultPanel.ZIndex = 40;
+                resultPanel.AddThemeStyleboxOverride("panel", BuildApprovedResultStyle());
             }
 
             resultLabel.CustomMinimumSize = ReferenceBattleLayout.ResultLabelMinimumSize;
-            resultLabel.AddThemeColorOverride("font_color", new Color("f3f3ef"));
+            resultLabel.AddThemeColorOverride("font_color", new Color("f4f1ea"));
             resultLabel.AddThemeColorOverride("font_shadow_color", Colors.Black);
             resultLabel.AddThemeConstantOverride("shadow_offset_x", 2);
             resultLabel.AddThemeConstantOverride("shadow_offset_y", 2);
             resultLabel.AddThemeFontSizeOverride("font_size", 28);
         }
 
-        // 战斗窗口文字全部使用关闭抗锯齿与次像素定位的共享字体。
         ApplyPixelFontRecursive(blocker);
         return true;
     }
 
-    /// <summary>递归给战斗窗口中的 Label 和 Button 应用同一套硬边系统字体。</summary>
+    /// <summary>创建定稿图使用的深色金边中央提示框。</summary>
+    private static StyleBoxFlat BuildApprovedResultStyle()
+    {
+        return new StyleBoxFlat
+        {
+            BgColor = new Color("07101d"),
+            BorderColor = new Color("c9a66a"),
+            BorderWidthLeft = 3,
+            BorderWidthTop = 3,
+            BorderWidthRight = 3,
+            BorderWidthBottom = 3,
+            CornerRadiusTopLeft = 3,
+            CornerRadiusTopRight = 3,
+            CornerRadiusBottomLeft = 3,
+            CornerRadiusBottomRight = 3
+        };
+    }
+
+    /// <summary>递归给战斗窗口文字应用共享字体。</summary>
     private static void ApplyPixelFontRecursive(Node node)
     {
         if (node is Label label)
@@ -164,8 +177,7 @@ public partial class BattlePresentationPolishCoordinator : Node
     }
 
     /// <summary>
-    /// 旧 AnimatedBattleCharacterControl 只保留单位与动作计时状态；真正可见的人物由独立 PNG 贴图层绘制。
-    /// 这样旧方块人、旧正式图集和旧程序补细节层都无法再次透到屏幕上。
+    /// 旧 AnimatedBattleCharacterControl 只保留单位与动作计时；真正可见的人物由独立正式设计稿层绘制。
     /// </summary>
     private static void ConfigureBattleCharacter(
         AnimatedBattleCharacterControl character,
@@ -175,19 +187,18 @@ public partial class BattlePresentationPolishCoordinator : Node
     {
         character.Position = position;
         character.Size = ReferenceBattleLayout.CharacterControlSize;
-        character.Scale = new Vector2(0.75f, 0.75f);
+        character.Scale = Vector2.One;
         character.MirrorHorizontally = mirrored;
         character.Modulate = Colors.White;
-        character.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
+        character.TextureFilter = CanvasItem.TextureFilterEnum.Linear;
 
         AttachDetachedBattleSprite(character, overlayName);
 
-        // 隐藏整个旧 CanvasItem，只保留它的 _Process 与 Play/SetUnit 状态更新。
-        // PNG 人物是同级节点，因此不会继承旧节点的 Visible=false。
+        // 隐藏旧绘制节点，但保留其 _Process 与 Play/SetUnit 状态更新。
         character.Visible = false;
     }
 
-    /// <summary>把真实 PNG 战斗人物作为旧状态节点的同级节点挂到舞台上。</summary>
+    /// <summary>把正式设计稿人物作为隐藏状态节点的同级节点挂到战斗舞台。</summary>
     private static void AttachDetachedBattleSprite(AnimatedBattleCharacterControl character, string overlayName)
     {
         Node? parent = character.GetParent();
@@ -196,7 +207,6 @@ public partial class BattlePresentationPolishCoordinator : Node
             return;
         }
 
-        // 清掉上一轮的程序标准人物，不允许它与真实 PNG 同时存在。
         foreach (ReferenceBattleFigureControl oldReference in parent.GetChildren().OfType<ReferenceBattleFigureControl>())
         {
             oldReference.Visible = false;
@@ -215,10 +225,10 @@ public partial class BattlePresentationPolishCoordinator : Node
         {
             existing.Position = character.Position;
             existing.Size = character.Size;
-            existing.Scale = character.Scale;
+            existing.Scale = Vector2.One;
             existing.ZIndex = 10;
             existing.Visible = true;
-            existing.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
+            existing.TextureFilter = CanvasItem.TextureFilterEnum.Linear;
             existing.Bind(character);
             return;
         }
@@ -228,10 +238,10 @@ public partial class BattlePresentationPolishCoordinator : Node
             Name = overlayName,
             Position = character.Position,
             Size = character.Size,
-            Scale = character.Scale,
+            Scale = Vector2.One,
             ZIndex = 10,
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            TextureFilter = CanvasItem.TextureFilterEnum.Nearest
+            TextureFilter = CanvasItem.TextureFilterEnum.Linear
         };
         parent.AddChild(overlay);
         overlay.Bind(character);
