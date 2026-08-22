@@ -1,4 +1,4 @@
-[gd_scene load_steps=18 format=3]
+[gd_scene load_steps=19 format=3]
 
 ; Main scene for the playable tactical-RPG prototype.
 ; Gameplay remains on MainGame.cs while presentation/interaction helpers are
@@ -21,6 +21,7 @@
 [ext_resource type="Script" path="res://scripts/visual/MapFigurePolishCoordinator.cs" id="16_map_figure_polish"]
 [ext_resource type="Script" path="res://scripts/visual/TeamPresentationCoordinator.cs" id="17_team_presentation"]
 [ext_resource type="Script" path="res://scripts/main/GroupCommandRecoveryCoordinator.cs" id="18_group_recovery"]
+[ext_resource type="Script" path="res://scripts/visual/ApprovedDialoguePresentationCoordinator.cs" id="19_dialogue_presentation"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -69,6 +70,9 @@ script = ExtResource("14_chapter_flow")
 
 [node name="ChapterDialogueCoordinator" type="Node" parent="."]
 script = ExtResource("15_chapter_dialogue")
+
+[node name="ApprovedDialoguePresentationCoordinator" type="Node" parent="."]
+script = ExtResource("19_dialogue_presentation")
 
 [node name="BattlePresentationPolishCoordinator" type="Node" parent="."]
 script = ExtResource("10_battle_polish")
