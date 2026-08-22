@@ -11,11 +11,14 @@ public static class ReferenceBattleLayout
     /// <summary>战斗界面的设计分辨率。</summary>
     public static readonly Vector2 ViewportSize = new(1280, 720);
 
-    /// <summary>左侧敌军人物控件位置。</summary>
-    public static readonly Vector2 LeftCharacterPosition = new(210, 40);
+    /// <summary>
+    /// 左侧敌军人物控件位置。
+    /// y=23 专门按统一 96×96 正式战斗帧校准：图集人物脚底约在逻辑 y=91，经过 4× 绘制和 0.75× 整体缩放后会落在状态框 y=305 的上沿。
+    /// </summary>
+    public static readonly Vector2 LeftCharacterPosition = new(210, 23);
 
-    /// <summary>右侧我方人物控件位置。</summary>
-    public static readonly Vector2 RightCharacterPosition = new(700, 40);
+    /// <summary>右侧我方人物使用与敌军完全相同的脚底基准，只改变横向位置和朝向。</summary>
+    public static readonly Vector2 RightCharacterPosition = new(700, 23);
 
     /// <summary>单侧人物控件尺寸。</summary>
     public static readonly Vector2 CharacterControlSize = new(420, 390);
