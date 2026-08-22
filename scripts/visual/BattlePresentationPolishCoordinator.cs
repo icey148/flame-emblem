@@ -70,7 +70,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
     }
 
-    /// <summary>把人物、HUD、结果框和特效层放到最终定稿位置。</summary>
+    /// <summary>把人物、HUD、结果框、金色外框和特效层放到最终定稿位置。</summary>
     private bool TryApplyPolish()
     {
         if (_battleCoordinator is null ||
@@ -91,6 +91,8 @@ public partial class BattlePresentationPolishCoordinator : Node
         {
             return false;
         }
+
+        EnsureApprovedFrame(blocker);
 
         ConfigureBattleCharacter(
             leftCharacter,
@@ -129,32 +131,57 @@ public partial class BattlePresentationPolishCoordinator : Node
             }
 
             resultLabel.CustomMinimumSize = ReferenceBattleLayout.ResultLabelMinimumSize;
-            resultLabel.AddThemeColorOverride("font_color", new Color("f4f1ea"));
+            resultLabel.AddThemeColorOverride("font_color", new Color("e0bd78"));
             resultLabel.AddThemeColorOverride("font_shadow_color", Colors.Black);
             resultLabel.AddThemeConstantOverride("shadow_offset_x", 2);
             resultLabel.AddThemeConstantOverride("shadow_offset_y", 2);
-            resultLabel.AddThemeFontSizeOverride("font_size", 28);
+            resultLabel.AddThemeFontSizeOverride("font_size", 32);
         }
 
         ApplyPixelFontRecursive(blocker);
         return true;
     }
 
-    /// <summary>创建定稿图使用的深色金边中央提示框。</summary>
+    /// <summary>确保最终整屏金色装饰框只创建一次，并始终位于人物下方、黑底上方。</summary>
+    private static void EnsureApprovedFrame(Control blocker)
+    {
+        ApprovedBattleFrameControl? existing = blocker.GetNodeOrNull<ApprovedBattleFrameControl>("ApprovedBattleFrame");
+        if (existing is not null)
+        {
+            existing.Position = Vector2.Zero;
+            existing.Size = ReferenceBattleLayout.ViewportSize;
+            existing.ZIndex = 5;
+            existing.Visible = true;
+            existing.QueueRedraw();
+            return;
+        }
+
+        ApprovedBattleFrameControl frame = new()
+        {
+            Name = "ApprovedBattleFrame",
+            Position = Vector2.Zero,
+            Size = ReferenceBattleLayout.ViewportSize,
+            ZIndex = 5,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        blocker.AddChild(frame);
+    }
+
+    /// <summary>创建最终定稿使用的深色金边中央提示框。</summary>
     private static StyleBoxFlat BuildApprovedResultStyle()
     {
         return new StyleBoxFlat
         {
-            BgColor = new Color("07101d"),
-            BorderColor = new Color("c9a66a"),
+            BgColor = new Color("07090d"),
+            BorderColor = new Color("b8833f"),
             BorderWidthLeft = 3,
             BorderWidthTop = 3,
             BorderWidthRight = 3,
             BorderWidthBottom = 3,
-            CornerRadiusTopLeft = 3,
-            CornerRadiusTopRight = 3,
-            CornerRadiusBottomLeft = 3,
-            CornerRadiusBottomRight = 3
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4,
+            CornerRadiusBottomRight = 4
         };
     }
 
