@@ -4,19 +4,22 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 对话/HUD 使用的正式人物头像控件。
-/// 头像只读取用户已经确认的正式设计稿；尚未完成正式头像的角色显示干净的空框，
-/// 不再回退到旧程序胸像或旧图集头像。
+/// 对话/HUD 使用的人物头像控件。
+/// 已完成角色优先显示用户确认的正式头像；尚未补齐正式头像时由 ApprovedCharacterArtCatalog 返回安全图集头像，
+/// 保证对话与战斗 HUD 不再出现黑块或空脸。
 /// </summary>
 public partial class CharacterPortraitControl : Control
 {
     /// <summary>当前需要展示的单位。</summary>
     private UnitModel? _unit;
 
+    /// <summary>低于等于这个尺寸的头像视为角色图集回退，需要最近邻显示。</summary>
+    private const int LowResolutionPortraitThreshold = 96;
+
     /// <summary>提供给阵营边框和对话层读取的只读人物引用。</summary>
     public UnitModel? DisplayedUnit => _unit;
 
-    /// <summary>启用平滑过滤；正式设计稿本身分辨率足够，不再用最近邻放大旧低分辨率占位图。</summary>
+    /// <summary>默认使用平滑过滤；实际绘制时会根据头像分辨率切换。</summary>
     public override void _Ready()
     {
         TextureFilter = CanvasItem.TextureFilterEnum.Linear;
@@ -29,7 +32,7 @@ public partial class CharacterPortraitControl : Control
         QueueRedraw();
     }
 
-    /// <summary>绘制深色底、金色内框和正式人物头像。</summary>
+    /// <summary>绘制深色底、金色内框和当前人物头像。</summary>
     public override void _Draw()
     {
         Rect2 bounds = new(Vector2.Zero, Size);
@@ -45,9 +48,14 @@ public partial class CharacterPortraitControl : Control
         Texture2D? portrait = ApprovedCharacterArtCatalog.TryLoadPortrait(_unit);
         if (portrait is null)
         {
-            // 正式素材缺失时保持空框，避免再次出现和设计稿不一致的程序头像。
             return;
         }
+
+        // 正式高清头像使用平滑过滤；64×64 左右的临时图集头像使用最近邻，避免放大后发糊。
+        TextureFilter = portrait.GetWidth() <= LowResolutionPortraitThreshold &&
+                        portrait.GetHeight() <= LowResolutionPortraitThreshold
+            ? CanvasItem.TextureFilterEnum.Nearest
+            : CanvasItem.TextureFilterEnum.Linear;
 
         DrawPortraitFitted(portrait, bounds.Grow(-7));
     }
