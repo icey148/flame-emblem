@@ -22,7 +22,10 @@ public static class EmbeddedCharacterArtCatalog
         }
 
         string path = $"res://assets/characters/{normalizedKey}/sheet.b64";
-        if (!FileAccess.FileExists(path))
+
+        // 项目启用了 .NET 隐式 using，System.IO.FileAccess 会与 Godot.FileAccess 同名。
+        // 这里显式使用 Godot.FileAccess，确保调用的是 Godot 的 res:// 文件系统接口。
+        if (!Godot.FileAccess.FileExists(path))
         {
             return null;
         }
@@ -30,7 +33,7 @@ public static class EmbeddedCharacterArtCatalog
         try
         {
             // Base64 文件只包含 PNG 字节的文本编码；去掉首尾空白后交给 .NET 固定解码。
-            string encoded = FileAccess.GetFileAsString(path).Trim();
+            string encoded = Godot.FileAccess.GetFileAsString(path).Trim();
             if (string.IsNullOrWhiteSpace(encoded))
             {
                 return null;
