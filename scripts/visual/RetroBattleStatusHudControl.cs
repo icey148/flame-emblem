@@ -4,17 +4,29 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 横向战斗画面的左右状态框。
-/// 视觉结构严格按当前确认的参考稿规格：黑色身份区、粗白像素边框、阵营色数据区，以及 HP/HIT/ATC/DEF 分段条。
-/// 本控件只重放已经结算好的 HP，并读取单位当前属性用于表现，不参与任何真实战斗判定。
+/// 最终战斗界面的左右人物状态面板。
+/// 结构以用户确认的定稿图为准：外侧正式头像、内侧姓名/职业/武器/LV、暗红/深蓝底色、
+/// 金色细边以及 HP/HIT/ATC/DEF 分段条。本控件只表现已结算数据，不参与战斗判定。
 /// </summary>
 public partial class RetroBattleStatusHudControl : Control
 {
-    /// <summary>外框像素厚度。</summary>
-    private const float BorderThickness = 4.0f;
+    /// <summary>头像区域宽度。</summary>
+    private const float PortraitWidth = 180.0f;
 
-    /// <summary>数据条统一使用的分段数量。</summary>
-    private const int MeterSegments = 24;
+    /// <summary>信息区与头像之间的金色分隔线宽度。</summary>
+    private const float SeparatorWidth = 2.0f;
+
+    /// <summary>分段条使用的格数。</summary>
+    private const int MeterSegments = 18;
+
+    /// <summary>面板金色主边框。</summary>
+    private static readonly Color Gold = new("c9a66a");
+
+    /// <summary>面板金色高光。</summary>
+    private static readonly Color GoldLight = new("e3c98d");
+
+    /// <summary>正文使用的浅色。</summary>
+    private static readonly Color TextColor = new("f3efe7");
 
     /// <summary>左侧固定单位。</summary>
     private UnitModel? _leftUnit;
@@ -43,38 +55,25 @@ public partial class RetroBattleStatusHudControl : Control
     /// <summary>玩家获得经验前 EXP。</summary>
     private int _experienceBefore;
 
-    /// <summary>左侧姓名。</summary>
-    private Label? _leftNameLabel;
+    /// <summary>左侧所有文字控件。</summary>
+    private SideLabels? _leftLabels;
 
-    /// <summary>左侧职业。</summary>
-    private Label? _leftClassLabel;
+    /// <summary>右侧所有文字控件。</summary>
+    private SideLabels? _rightLabels;
 
-    /// <summary>左侧等级。</summary>
-    private Label? _leftLevelLabel;
-
-    /// <summary>右侧姓名。</summary>
-    private Label? _rightNameLabel;
-
-    /// <summary>右侧职业。</summary>
-    private Label? _rightClassLabel;
-
-    /// <summary>右侧等级。</summary>
-    private Label? _rightLevelLabel;
-
-    /// <summary>创建文字层并强制使用最近邻纹理过滤。</summary>
+    /// <summary>创建左右文字层并使用正式设计稿需要的平滑头像过滤。</summary>
     public override void _Ready()
     {
         ProcessMode = ProcessModeEnum.Always;
         MouseFilter = MouseFilterEnum.Ignore;
-        TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
-        CreateIdentityLabels();
+        TextureFilter = CanvasItem.TextureFilterEnum.Linear;
+        _leftLabels = CreateSideLabels(0.0f, true);
+        _rightLabels = CreateSideLabels(ReferenceBattleLayout.PanelWidth + ReferenceBattleLayout.PanelGap, false);
+        RefreshAllLabels();
         QueueRedraw();
     }
 
-    /// <summary>
-    /// 开始一场战斗状态展示。
-    /// HP 使用结算前快照，避免真实结算已经完成后直接跳到最终血量。
-    /// </summary>
+    /// <summary>开始一场战斗状态展示，并保存结算前 HP 快照。</summary>
     public void BeginBattle(
         UnitModel leftUnit,
         int leftHp,
@@ -95,15 +94,11 @@ public partial class RetroBattleStatusHudControl : Control
         _experienceUnit = experienceUnit;
         _experienceLevelBefore = Math.Max(1, experienceLevelBefore);
         _experienceBefore = Math.Clamp(experienceBefore, 0, 99);
-
-        RefreshIdentityLabels();
+        RefreshAllLabels();
         QueueRedraw();
     }
 
-    /// <summary>
-    /// 按逐击结果推进双方 HP。
-    /// 法术 HP 成本先扣攻击者，命中后再扣防守者伤害，顺序和真实结算保持一致。
-    /// </summary>
+    /// <summary>按逐击结果推进演出中的 HP。</summary>
     public void ApplyStrike(CombatStrikeResult strike)
     {
         if (_leftUnit is null || _rightUnit is null)
@@ -132,13 +127,11 @@ public partial class RetroBattleStatusHudControl : Control
             }
         }
 
+        RefreshAllLabels();
         QueueRedraw();
     }
 
-    /// <summary>
-    /// 返回本场真实获得的经验值。
-    /// 参考稿战斗框不额外塞入 EXP 小面板，EXP/升级结果由中央信息框展示。
-    /// </summary>
+    /// <summary>返回本场真实获得的经验值，实际文字仍由中央信息框展示。</summary>
     public int ShowExperienceResult()
     {
         if (_experienceUnit is null)
@@ -161,162 +154,185 @@ public partial class RetroBattleStatusHudControl : Control
         _rightHp = 0;
         _leftMaxHp = 1;
         _rightMaxHp = 1;
-        RefreshIdentityLabels();
+        RefreshAllLabels();
         QueueRedraw();
     }
 
-    /// <summary>绘制左右两个参考稿式状态框。</summary>
+    /// <summary>绘制左右两块正式信息面板。</summary>
     public override void _Draw()
     {
-        DrawSidePanel(new Vector2(0, 0), _leftUnit, _leftHp, _leftMaxHp, _rightUnit);
+        DrawSidePanel(Vector2.Zero, _leftUnit, _leftHp, _leftMaxHp, _rightUnit, true);
         DrawSidePanel(
             new Vector2(ReferenceBattleLayout.PanelWidth + ReferenceBattleLayout.PanelGap, 0),
             _rightUnit,
             _rightHp,
             _rightMaxHp,
-            _leftUnit);
+            _leftUnit,
+            false);
     }
 
-    /// <summary>绘制单侧状态框、阵营色数据区和四条分段计量条。</summary>
+    /// <summary>绘制一侧头像、底色、金边、分隔线和四条数值条。</summary>
     private void DrawSidePanel(
         Vector2 origin,
         UnitModel? unit,
         int hp,
         int maxHp,
-        UnitModel? opponent)
+        UnitModel? opponent,
+        bool portraitOnLeft)
     {
         UnitTeam team = unit?.Team ?? UnitTeam.Player;
-        Color primary = TeamVisualPalette.Primary(team);
-        Color highlight = TeamVisualPalette.Highlight(team);
-        Color dataBackground = primary.Darkened(0.08f);
-        Color emptySegment = primary.Darkened(0.46f);
-        Color white = new("f3f3ef");
-        Color black = new("050608");
+        Color teamPrimary = TeamVisualPalette.Primary(team);
+        Color teamHighlight = TeamVisualPalette.Highlight(team);
+        Color panelDark = teamPrimary.Darkened(0.62f);
+        Color panelMid = teamPrimary.Darkened(0.38f);
+        Color emptySegment = teamPrimary.Darkened(0.70f);
 
-        Rect2 fullPanel = new(
-            origin,
-            new Vector2(ReferenceBattleLayout.PanelWidth, ReferenceBattleLayout.PanelHeight));
-        Rect2 dataPanel = new(
-            origin + new Vector2(0, ReferenceBattleLayout.IdentityHeight),
-            new Vector2(
-                ReferenceBattleLayout.PanelWidth,
-                ReferenceBattleLayout.PanelHeight - ReferenceBattleLayout.IdentityHeight));
+        Rect2 panel = new(origin, new Vector2(ReferenceBattleLayout.PanelWidth, ReferenceBattleLayout.PanelHeight));
+        DrawRect(panel, new Color("05070b"), true);
+        DrawRect(new Rect2(origin + new Vector2(4, 4), new Vector2(panel.Size.X - 8, panel.Size.Y - 8)), panelDark, true);
 
-        // 参考稿使用纯黑身份区和高对比白色硬边框，不再使用青铜或灰蓝框架。
-        DrawRect(fullPanel, black, true);
-        DrawRect(dataPanel, dataBackground, true);
-        DrawRect(fullPanel, white, false, BorderThickness);
-        DrawLine(
-            origin + new Vector2(0, ReferenceBattleLayout.IdentityHeight),
-            origin + new Vector2(ReferenceBattleLayout.PanelWidth, ReferenceBattleLayout.IdentityHeight),
-            white,
-            BorderThickness,
-            false);
+        float portraitX = portraitOnLeft ? origin.X + 4 : origin.X + ReferenceBattleLayout.PanelWidth - PortraitWidth - 4;
+        float infoX = portraitOnLeft ? origin.X + PortraitWidth : origin.X + 4;
+        float infoWidth = ReferenceBattleLayout.PanelWidth - PortraitWidth - 8;
 
-        // 数据区只做一条上沿高光和一条底部暗线，保持参考稿简洁硬边的视觉密度。
+        // 信息区用上下两档阵营色，模拟定稿图的暗色层次，而不是上一版的大块纯色。
         DrawRect(
-            new Rect2(dataPanel.Position + new Vector2(7, 7), new Vector2(dataPanel.Size.X - 14, 3)),
-            highlight,
+            new Rect2(new Vector2(infoX, origin.Y + 4), new Vector2(infoWidth, 106)),
+            panelDark.Darkened(0.08f),
             true);
         DrawRect(
-            new Rect2(dataPanel.Position + new Vector2(7, dataPanel.Size.Y - 10), new Vector2(dataPanel.Size.X - 14, 3)),
-            primary.Darkened(0.36f),
+            new Rect2(new Vector2(infoX, origin.Y + 110), new Vector2(infoWidth, ReferenceBattleLayout.PanelHeight - 114)),
+            panelMid,
+            true);
+        DrawRect(
+            new Rect2(new Vector2(infoX + 8, origin.Y + 111), new Vector2(infoWidth - 16, 2)),
+            teamHighlight,
             true);
 
-        int hit = unit is null || opponent is null
-            ? 0
-            : CombatRules.CalculateHitRate(unit, opponent, 0);
+        DrawPortrait(unit, new Rect2(new Vector2(portraitX, origin.Y + 5), new Vector2(PortraitWidth - 8, ReferenceBattleLayout.PanelHeight - 10)));
+
+        float separatorX = portraitOnLeft ? origin.X + PortraitWidth : origin.X + ReferenceBattleLayout.PanelWidth - PortraitWidth;
+        DrawRect(new Rect2(new Vector2(separatorX, origin.Y + 3), new Vector2(SeparatorWidth, panel.Size.Y - 6)), Gold, true);
+
+        DrawRect(panel, Gold, false, 3.0f);
+        DrawRect(panel.Grow(-5), GoldLight.Darkened(0.36f), false, 1.0f);
+
+        int hit = unit is null || opponent is null ? 0 : CombatRules.CalculateHitRate(unit, opponent, 0);
         int attack = unit is null
             ? 0
             : (unit.EquippedWeapon.DamageType == DamageType.Magical ? unit.Magic : unit.Strength) + unit.EquippedWeapon.Might;
         int defense = unit?.Defense ?? 0;
 
-        DrawMetricRow(origin, 194, hp, Math.Max(1, maxHp), white, emptySegment, true);
-        DrawMetricRow(origin, 242, hit, 100, white, emptySegment, false);
-        DrawMetricRow(origin, 290, attack, 40, white, emptySegment, false);
-        DrawMetricRow(origin, 338, defense, 30, white, emptySegment, false);
+        DrawMetricBar(origin, portraitOnLeft, 132, hp, Math.Max(1, maxHp), TextColor, emptySegment);
+        DrawMetricBar(origin, portraitOnLeft, 166, hit, 100, TextColor, emptySegment);
+        DrawMetricBar(origin, portraitOnLeft, 200, attack, 40, TextColor, emptySegment);
+        DrawMetricBar(origin, portraitOnLeft, 234, defense, 30, TextColor, emptySegment);
     }
 
-    /// <summary>绘制一行固定 24 格像素计量条。</summary>
-    private void DrawMetricRow(
-        Vector2 origin,
+    /// <summary>绘制正式头像；没有正式头像时保留干净深色空框。</summary>
+    private void DrawPortrait(UnitModel? unit, Rect2 bounds)
+    {
+        DrawRect(bounds, new Color("07090d"), true);
+        if (unit is null)
+        {
+            return;
+        }
+
+        Texture2D? portrait = ApprovedCharacterArtCatalog.TryLoadPortrait(unit);
+        if (portrait is null)
+        {
+            return;
+        }
+
+        float sourceWidth = Math.Max(1, portrait.GetWidth());
+        float sourceHeight = Math.Max(1, portrait.GetHeight());
+        float scale = MathF.Min(bounds.Size.X / sourceWidth, bounds.Size.Y / sourceHeight);
+        Vector2 targetSize = new(sourceWidth * scale, sourceHeight * scale);
+        Vector2 targetPosition = bounds.Position + (bounds.Size - targetSize) * 0.5f;
+        DrawTextureRect(
+            portrait,
+            new Rect2(
+                new Vector2(Mathf.Round(targetPosition.X), Mathf.Round(targetPosition.Y)),
+                new Vector2(Mathf.Round(targetSize.X), Mathf.Round(targetSize.Y))),
+            false);
+    }
+
+    /// <summary>绘制一行 18 格硬边数值条。</summary>
+    private void DrawMetricBar(
+        Vector2 panelOrigin,
+        bool portraitOnLeft,
         float y,
         int value,
         int maxValue,
         Color filled,
-        Color empty,
-        bool hpRow)
+        Color empty)
     {
-        // 行首预留给 HP/HIT/ATC/DEF 标签，条本体锁在参考稿同样的横向占比。
-        Rect2 meterRect = new(
-            origin + new Vector2(120, y),
-            new Vector2(390, hpRow ? 22 : 20));
-        DrawSegmentMeter(meterRect, value, maxValue, filled, empty);
+        float infoX = portraitOnLeft
+            ? panelOrigin.X + PortraitWidth
+            : panelOrigin.X + 4;
+        Rect2 meter = new(
+            new Vector2(infoX + 74, panelOrigin.Y + y),
+            new Vector2(258, 18));
+        DrawSegmentMeter(meter, value, maxValue, filled, empty);
     }
 
-    /// <summary>绘制固定数量的硬边分段条，任何缩放下都保持独立方块而不是平滑渐变。</summary>
+    /// <summary>按固定格数绘制数值条，避免使用平滑渐变。</summary>
     private void DrawSegmentMeter(Rect2 rect, int value, int maxValue, Color filled, Color empty)
     {
-        float safeRatio = Mathf.Clamp((float)value / Math.Max(1, maxValue), 0.0f, 1.0f);
-        int filledSegments = (int)MathF.Round(safeRatio * MeterSegments);
-        float segmentGap = 2.0f;
-        float segmentWidth = MathF.Floor((rect.Size.X - segmentGap * (MeterSegments - 1)) / MeterSegments);
-        float usedWidth = segmentWidth * MeterSegments + segmentGap * (MeterSegments - 1);
-        float startX = rect.Position.X + MathF.Floor((rect.Size.X - usedWidth) * 0.5f);
+        float ratio = Mathf.Clamp((float)value / Math.Max(1, maxValue), 0.0f, 1.0f);
+        int filledSegments = (int)MathF.Round(ratio * MeterSegments);
+        float gap = 2.0f;
+        float width = MathF.Floor((rect.Size.X - gap * (MeterSegments - 1)) / MeterSegments);
 
         for (int index = 0; index < MeterSegments; index++)
         {
             Rect2 segment = new(
-                new Vector2(startX + index * (segmentWidth + segmentGap), rect.Position.Y),
-                new Vector2(segmentWidth, rect.Size.Y));
-            Color color = index < filledSegments ? filled : empty;
-            DrawRect(segment, color, true);
-            DrawRect(segment, new Color("101116"), false, 1.0f);
+                new Vector2(rect.Position.X + index * (width + gap), rect.Position.Y),
+                new Vector2(width, rect.Size.Y));
+            DrawRect(segment, index < filledSegments ? filled : empty, true);
+            DrawRect(segment, new Color("0b0d12"), false, 1.0f);
         }
     }
 
-    /// <summary>创建身份区和数据区所需的全部文字标签。</summary>
-    private void CreateIdentityLabels()
+    /// <summary>创建一侧姓名、职业、武器、等级和四项数值文字。</summary>
+    private SideLabels CreateSideLabels(float panelX, bool portraitOnLeft)
     {
-        _leftNameLabel = CreatePixelLabel(new Vector2(28, 28), new Vector2(340, 48), HorizontalAlignment.Left, 29);
-        _leftClassLabel = CreatePixelLabel(new Vector2(28, 82), new Vector2(320, 42), HorizontalAlignment.Left, 24);
-        _leftLevelLabel = CreatePixelLabel(new Vector2(388, 34), new Vector2(122, 42), HorizontalAlignment.Right, 25);
-
-        float rightX = ReferenceBattleLayout.PanelWidth + ReferenceBattleLayout.PanelGap;
-        _rightNameLabel = CreatePixelLabel(new Vector2(rightX + 28, 28), new Vector2(340, 48), HorizontalAlignment.Left, 29);
-        _rightClassLabel = CreatePixelLabel(new Vector2(rightX + 28, 82), new Vector2(320, 42), HorizontalAlignment.Left, 24);
-        _rightLevelLabel = CreatePixelLabel(new Vector2(rightX + 388, 34), new Vector2(122, 42), HorizontalAlignment.Right, 25);
-
-        foreach (Label label in new[]
-                 {
-                     _leftNameLabel,
-                     _leftClassLabel,
-                     _leftLevelLabel,
-                     _rightNameLabel,
-                     _rightClassLabel,
-                     _rightLevelLabel
-                 })
+        float infoX = portraitOnLeft ? panelX + PortraitWidth : panelX + 4;
+        SideLabels labels = new()
         {
-            AddChild(label);
-        }
+            Name = CreateLabel(new Vector2(infoX + 18, 13), new Vector2(270, 35), 24, GoldLight, HorizontalAlignment.Left),
+            Class = CreateLabel(new Vector2(infoX + 18, 48), new Vector2(250, 26), 16, TextColor, HorizontalAlignment.Left),
+            Weapon = CreateLabel(new Vector2(infoX + 18, 76), new Vector2(250, 25), 15, new Color("e5d4b2"), HorizontalAlignment.Left),
+            Level = CreateLabel(new Vector2(infoX + 334, 16), new Vector2(82, 31), 18, GoldLight, HorizontalAlignment.Right),
+            HpValue = CreateLabel(new Vector2(infoX + 342, 126), new Vector2(70, 28), 18, TextColor, HorizontalAlignment.Right),
+            HitValue = CreateLabel(new Vector2(infoX + 342, 160), new Vector2(70, 28), 18, TextColor, HorizontalAlignment.Right),
+            AttackValue = CreateLabel(new Vector2(infoX + 342, 194), new Vector2(70, 28), 18, TextColor, HorizontalAlignment.Right),
+            DefenseValue = CreateLabel(new Vector2(infoX + 342, 228), new Vector2(70, 28), 18, TextColor, HorizontalAlignment.Right)
+        };
 
-        // 数据区标签位置与四条分段条严格对齐。
-        AddChild(CreateMetricLabel(new Vector2(28, 187), "HP"));
-        AddChild(CreateMetricLabel(new Vector2(28, 235), "HIT"));
-        AddChild(CreateMetricLabel(new Vector2(28, 283), "ATC"));
-        AddChild(CreateMetricLabel(new Vector2(28, 331), "DEF"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 187), "HP"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 235), "HIT"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 283), "ATC"));
-        AddChild(CreateMetricLabel(new Vector2(rightX + 28, 331), "DEF"));
+        AddChild(labels.Name);
+        AddChild(labels.Class);
+        AddChild(labels.Weapon);
+        AddChild(labels.Level);
+        AddChild(labels.HpValue);
+        AddChild(labels.HitValue);
+        AddChild(labels.AttackValue);
+        AddChild(labels.DefenseValue);
+
+        AddChild(CreateMetricName(new Vector2(infoX + 18, 126), "HP"));
+        AddChild(CreateMetricName(new Vector2(infoX + 18, 160), "HIT"));
+        AddChild(CreateMetricName(new Vector2(infoX + 18, 194), "ATC"));
+        AddChild(CreateMetricName(new Vector2(infoX + 18, 228), "DEF"));
+        return labels;
     }
 
-    /// <summary>创建身份文字，使用粗白字和黑色像素阴影提高黑底可读性。</summary>
-    private static Label CreatePixelLabel(
+    /// <summary>创建普通战斗 HUD 文字。</summary>
+    private static Label CreateLabel(
         Vector2 position,
         Vector2 size,
-        HorizontalAlignment alignment,
-        int fontSize)
+        int fontSize,
+        Color color,
+        HorizontalAlignment alignment)
     {
         Label label = new()
         {
@@ -326,54 +342,86 @@ public partial class RetroBattleStatusHudControl : Control
             VerticalAlignment = VerticalAlignment.Center,
             MouseFilter = MouseFilterEnum.Ignore
         };
-        label.AddThemeColorOverride("font_color", new Color("f3f3ef"));
-        label.AddThemeColorOverride("font_shadow_color", Colors.Black);
-        label.AddThemeConstantOverride("shadow_offset_x", 2);
-        label.AddThemeConstantOverride("shadow_offset_y", 2);
-        label.AddThemeFontSizeOverride("font_size", fontSize);
         label.AddThemeFontOverride("font", BattlePixelFontCatalog.Font);
+        label.AddThemeFontSizeOverride("font_size", fontSize);
+        label.AddThemeColorOverride("font_color", color);
+        label.AddThemeColorOverride("font_shadow_color", Colors.Black);
+        label.AddThemeConstantOverride("shadow_offset_x", 1);
+        label.AddThemeConstantOverride("shadow_offset_y", 1);
         return label;
     }
 
-    /// <summary>创建 HP/HIT/ATC/DEF 行首标签。</summary>
-    private static Label CreateMetricLabel(Vector2 position, string text)
+    /// <summary>创建 HP/HIT/ATC/DEF 行首金色标签。</summary>
+    private static Label CreateMetricName(Vector2 position, string text)
     {
-        Label label = CreatePixelLabel(position, new Vector2(82, 32), HorizontalAlignment.Left, 24);
+        Label label = CreateLabel(position, new Vector2(54, 28), 17, GoldLight, HorizontalAlignment.Left);
         label.Text = text;
         return label;
     }
 
-    /// <summary>把当前双方中文姓名、职业和等级写入身份区。</summary>
-    private void RefreshIdentityLabels()
+    /// <summary>刷新双方全部动态文字。</summary>
+    private void RefreshAllLabels()
     {
-        if (_leftNameLabel is not null)
+        RefreshSideLabels(_leftLabels, _leftUnit, _leftHp, _leftMaxHp, _rightUnit);
+        RefreshSideLabels(_rightLabels, _rightUnit, _rightHp, _rightMaxHp, _leftUnit);
+    }
+
+    /// <summary>刷新一侧名字、职业、武器、等级以及四项真实数值。</summary>
+    private static void RefreshSideLabels(
+        SideLabels? labels,
+        UnitModel? unit,
+        int hp,
+        int maxHp,
+        UnitModel? opponent)
+    {
+        if (labels is null)
         {
-            _leftNameLabel.Text = _leftUnit?.DisplayName ?? string.Empty;
+            return;
         }
 
-        if (_leftClassLabel is not null)
+        if (unit is null)
         {
-            _leftClassLabel.Text = _leftUnit?.ClassDefinition.DisplayName ?? string.Empty;
+            labels.Clear();
+            return;
         }
 
-        if (_leftLevelLabel is not null)
-        {
-            _leftLevelLabel.Text = _leftUnit is null ? string.Empty : $"LV{_leftUnit.Level}";
-        }
+        int hit = opponent is null ? 0 : CombatRules.CalculateHitRate(unit, opponent, 0);
+        int attack = (unit.EquippedWeapon.DamageType == DamageType.Magical ? unit.Magic : unit.Strength) + unit.EquippedWeapon.Might;
+        int defense = unit.Defense;
 
-        if (_rightNameLabel is not null)
-        {
-            _rightNameLabel.Text = _rightUnit?.DisplayName ?? string.Empty;
-        }
+        labels.Name.Text = unit.DisplayName;
+        labels.Class.Text = unit.ClassDefinition.DisplayName;
+        labels.Weapon.Text = unit.EquippedWeapon.DisplayName;
+        labels.Level.Text = $"LV {unit.Level}";
+        labels.HpValue.Text = Math.Clamp(hp, 0, Math.Max(1, maxHp)).ToString();
+        labels.HitValue.Text = hit.ToString();
+        labels.AttackValue.Text = attack.ToString();
+        labels.DefenseValue.Text = defense.ToString();
+    }
 
-        if (_rightClassLabel is not null)
-        {
-            _rightClassLabel.Text = _rightUnit?.ClassDefinition.DisplayName ?? string.Empty;
-        }
+    /// <summary>保存一侧 HUD 的动态文字引用。</summary>
+    private sealed class SideLabels
+    {
+        public Label Name { get; init; } = null!;
+        public Label Class { get; init; } = null!;
+        public Label Weapon { get; init; } = null!;
+        public Label Level { get; init; } = null!;
+        public Label HpValue { get; init; } = null!;
+        public Label HitValue { get; init; } = null!;
+        public Label AttackValue { get; init; } = null!;
+        public Label DefenseValue { get; init; } = null!;
 
-        if (_rightLevelLabel is not null)
+        /// <summary>清空没有人物时的所有动态文字。</summary>
+        public void Clear()
         {
-            _rightLevelLabel.Text = _rightUnit is null ? string.Empty : $"LV{_rightUnit.Level}";
+            Name.Text = string.Empty;
+            Class.Text = string.Empty;
+            Weapon.Text = string.Empty;
+            Level.Text = string.Empty;
+            HpValue.Text = string.Empty;
+            HitValue.Text = string.Empty;
+            AttackValue.Text = string.Empty;
+            DefenseValue.Text = string.Empty;
         }
     }
 }
