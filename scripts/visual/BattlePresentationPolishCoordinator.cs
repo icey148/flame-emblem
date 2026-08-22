@@ -128,6 +128,7 @@ public partial class BattlePresentationPolishCoordinator : Node
                 resultPanel.Size = ReferenceBattleLayout.ResultPanelSize;
                 resultPanel.ZIndex = 40;
                 resultPanel.AddThemeStyleboxOverride("panel", BuildApprovedResultStyle());
+                EnsureApprovedResultText(resultPanel, resultLabel);
             }
 
             resultLabel.CustomMinimumSize = ReferenceBattleLayout.ResultLabelMinimumSize;
@@ -165,6 +166,30 @@ public partial class BattlePresentationPolishCoordinator : Node
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
         blocker.AddChild(frame);
+    }
+
+    /// <summary>把原始结果 Label 隐藏为数据源，并创建最终金字/红色伤害数字显示层。</summary>
+    private static void EnsureApprovedResultText(PanelContainer resultPanel, Label resultLabel)
+    {
+        ApprovedBattleResultControl? existing = resultPanel.GetNodeOrNull<ApprovedBattleResultControl>("ApprovedBattleResultText");
+        if (existing is not null)
+        {
+            existing.Size = ReferenceBattleLayout.ResultLabelMinimumSize;
+            existing.Visible = true;
+            existing.Bind(resultLabel);
+            return;
+        }
+
+        ApprovedBattleResultControl resultText = new()
+        {
+            Name = "ApprovedBattleResultText",
+            Position = Vector2.Zero,
+            Size = ReferenceBattleLayout.ResultLabelMinimumSize,
+            CustomMinimumSize = ReferenceBattleLayout.ResultLabelMinimumSize,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        resultPanel.AddChild(resultText);
+        resultText.Bind(resultLabel);
     }
 
     /// <summary>创建最终定稿使用的深色金边中央提示框。</summary>
