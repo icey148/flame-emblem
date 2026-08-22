@@ -23,15 +23,6 @@ public partial class BattleSpriteFigureControl : Control
     /// <summary>读取隐藏状态节点中的动作播放时间。</summary>
     private FieldInfo? _elapsedField;
 
-    /// <summary>正式人物在单侧区域中的最大绘制宽度。</summary>
-    private const float MaximumFigureWidth = 470.0f;
-
-    /// <summary>正式人物在单侧区域中的最大绘制高度。</summary>
-    private const float MaximumFigureHeight = 335.0f;
-
-    /// <summary>人物脚底在本控件中的固定基准线。</summary>
-    private const float GroundY = 382.0f;
-
     /// <summary>物理攻击时间与现有战斗时间线保持一致。</summary>
     private const float AttackDuration = 0.34f;
 
@@ -84,32 +75,36 @@ public partial class BattleSpriteFigureControl : Control
         DrawApprovedFigure(texture, motion, opacity);
     }
 
-    /// <summary>绘制低矮阴影和阵营色落脚线。</summary>
+    /// <summary>绘制低矮阴影和阵营色落脚线，使人物在纯黑背景上有明确接地感。</summary>
     private void DrawGround(UnitModel unit, Vector2 motion, float opacity)
     {
         float centerX = Size.X * 0.5f + motion.X;
+        float groundY = ReferenceBattleLayout.CharacterGroundY;
         Rect2 shadow = new(
-            new Vector2(Mathf.Round(centerX - 112), GroundY - 8 + motion.Y),
-            new Vector2(224, 7));
-        DrawRect(shadow, new Color(0.03f, 0.03f, 0.05f, 0.46f * opacity), true);
+            new Vector2(Mathf.Round(centerX - 118), groundY - 8 + motion.Y),
+            new Vector2(236, 7));
+
+        DrawRect(shadow, new Color(0.03f, 0.025f, 0.025f, 0.52f * opacity), true);
         DrawRect(
-            new Rect2(shadow.Position + new Vector2(42, 7), new Vector2(140, 3)),
-            Fade(TeamVisualPalette.Primary(unit.Team), opacity),
+            new Rect2(shadow.Position + new Vector2(46, 7), new Vector2(144, 3)),
+            Fade(TeamVisualPalette.Primary(unit.Team).Darkened(0.12f), opacity),
             true);
     }
 
     /// <summary>
-    /// 等比放大正式设计稿，使人物尽量占满上半区并把脚底锁到统一基准线。
-    /// 设计稿本身已经按照“敌人朝右、我方朝左”制作，因此这里不再翻转人物。
+    /// 等比缩放正式设计稿，使人物尽量占满上半区并把脚底锁到统一基准线。
+    /// 设计稿本身已经按照敌左我右的方向制作，因此这里不再对高精度人物做镜像变形。
     /// </summary>
     private void DrawApprovedFigure(Texture2D texture, Vector2 motion, float opacity)
     {
         float sourceWidth = Math.Max(1, texture.GetWidth());
         float sourceHeight = Math.Max(1, texture.GetHeight());
-        float scale = MathF.Min(MaximumFigureWidth / sourceWidth, MaximumFigureHeight / sourceHeight);
+        float scale = MathF.Min(
+            ReferenceBattleLayout.CharacterMaximumWidth / sourceWidth,
+            ReferenceBattleLayout.CharacterMaximumHeight / sourceHeight);
         Vector2 targetSize = new(sourceWidth * scale, sourceHeight * scale);
         float x = (Size.X - targetSize.X) * 0.5f + motion.X;
-        float y = GroundY - targetSize.Y + motion.Y;
+        float y = ReferenceBattleLayout.CharacterGroundY - targetSize.Y + motion.Y;
 
         Rect2 target = new(
             new Vector2(Mathf.Round(x), Mathf.Round(y)),
@@ -145,7 +140,7 @@ public partial class BattleSpriteFigureControl : Control
         return new Vector2(Mathf.Round(motion.X), Mathf.Round(motion.Y));
     }
 
-    /// <summary>攻击阶段只做短后撤、快速突进、收势三段。</summary>
+    /// <summary>攻击阶段只做短后撤、快速突进、收势三段，保持人物本身的正式美术不被变形。</summary>
     private static Vector2 ResolveAttackMotion(float elapsed, float direction)
     {
         float t = Mathf.Clamp(elapsed / AttackDuration, 0.0f, 1.0f);
