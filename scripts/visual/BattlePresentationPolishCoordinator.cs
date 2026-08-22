@@ -95,7 +95,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
 
         // 标准人物内部继续以 4px 为逻辑像素，外层 0.75 倍后得到严格的 3px 屏幕像素。
-        // 新人物层使用短身宽肩比例，因此不再出现旧版细长火柴人轮廓。
+        // 旧 AnimatedBattleCharacterControl 仅保留人物与时间线状态，不再参与实际绘制。
         ConfigureBattleCharacter(
             leftCharacter,
             ReferenceBattleLayout.LeftCharacterPosition + new Vector2(0.5f, 0.25f),
@@ -110,6 +110,7 @@ public partial class BattlePresentationPolishCoordinator : Node
         // 双状态框、人物区域和中央信息框全部读取同一份规格。
         statusHud.Position = ReferenceBattleLayout.StatusHudPosition;
         statusHud.Size = ReferenceBattleLayout.StatusHudSize;
+        statusHud.ZIndex = 30;
         statusHud.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
 
         if (_effectControlField?.GetValue(_battleCoordinator) is RetroBattleEffectControl effectControl)
@@ -118,6 +119,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             effectControl.Size = new Vector2(
                 ReferenceBattleLayout.ViewportSize.X,
                 ReferenceBattleLayout.EffectRegionHeight);
+            effectControl.ZIndex = 20;
             effectControl.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
         }
 
@@ -127,6 +129,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             {
                 resultPanel.Position = ReferenceBattleLayout.ResultPanelPosition;
                 resultPanel.Size = ReferenceBattleLayout.ResultPanelSize;
+                resultPanel.ZIndex = 40;
             }
 
             resultLabel.CustomMinimumSize = ReferenceBattleLayout.ResultLabelMinimumSize;
@@ -160,7 +163,10 @@ public partial class BattlePresentationPolishCoordinator : Node
         }
     }
 
-    /// <summary>统一设置单侧战斗人物的 3× 逻辑像素缩放，并挂载标准稿人物层。</summary>
+    /// <summary>
+    /// 统一设置单侧人物状态节点，并把真正显示的人物改为舞台同级标准人物层。
+    /// 旧人物节点仍继续推进动画状态，但自身完全隐藏，因此不可能再把旧细长人物画到屏幕上。
+    /// </summary>
     private static void ConfigureBattleCharacter(
         AnimatedBattleCharacterControl character,
         Vector2 position,
@@ -173,35 +179,59 @@ public partial class BattlePresentationPolishCoordinator : Node
         character.MirrorHorizontally = mirrored;
         character.Modulate = Colors.White;
         character.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
-        AttachReferenceFigure(character, overlayName);
+
+        AttachDetachedReferenceFigure(character, overlayName);
+
+        // 隐藏整个旧 CanvasItem，只保留它的 _Process 与 Play/SetUnit 状态更新。
+        // 标准人物作为同级节点绘制，因此不会受到旧节点 Visible 的继承影响。
+        character.Visible = false;
     }
 
     /// <summary>
-    /// 给现有动画人物挂载标准稿比例的人物层。
-    /// 旧 CinematicBattleFigureControl 会被禁用，避免两个程序人物同时绘制。
+    /// 把标准人物作为旧人物节点的同级节点挂到舞台上。
+    /// 这样父节点可见性、SelfModulate 和旧程序绘制都无法再影响标准人物。
     /// </summary>
-    private static void AttachReferenceFigure(AnimatedBattleCharacterControl character, string overlayName)
+    private static void AttachDetachedReferenceFigure(AnimatedBattleCharacterControl character, string overlayName)
     {
-        foreach (CinematicBattleFigureControl oldFigure in character.GetChildren().OfType<CinematicBattleFigureControl>())
+        Node? parent = character.GetParent();
+        if (parent is null)
         {
-            oldFigure.Visible = false;
-            oldFigure.SetProcess(false);
+            return;
         }
 
-        if (character.GetChildren().OfType<ReferenceBattleFigureControl>().Any())
+        // 清掉上一版曾挂在旧人物内部的标准人物，避免升级后出现重复绘制。
+        foreach (ReferenceBattleFigureControl nested in character.GetChildren().OfType<ReferenceBattleFigureControl>())
         {
+            nested.Visible = false;
+            nested.SetProcess(false);
+            nested.QueueFree();
+        }
+
+        // 同一舞台已经存在正确的独立人物层时只重新绑定布局，不再重复创建。
+        ReferenceBattleFigureControl? existing = parent.GetNodeOrNull<ReferenceBattleFigureControl>(overlayName);
+        if (existing is not null)
+        {
+            existing.Position = character.Position;
+            existing.Size = character.Size;
+            existing.Scale = character.Scale;
+            existing.ZIndex = 10;
+            existing.Visible = true;
+            existing.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
+            existing.Bind(character);
             return;
         }
 
         ReferenceBattleFigureControl overlay = new()
         {
             Name = overlayName,
-            Position = Vector2.Zero,
+            Position = character.Position,
             Size = character.Size,
+            Scale = character.Scale,
+            ZIndex = 10,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest
         };
-        character.AddChild(overlay);
+        parent.AddChild(overlay);
         overlay.Bind(character);
     }
 }
