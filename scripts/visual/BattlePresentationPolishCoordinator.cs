@@ -94,18 +94,18 @@ public partial class BattlePresentationPolishCoordinator : Node
             return false;
         }
 
-        // 标准人物内部继续以 4px 为逻辑像素，外层 0.75 倍后得到严格的 3px 屏幕像素。
-        // 旧 AnimatedBattleCharacterControl 仅保留人物与时间线状态，不再参与实际绘制。
+        // 80×75 正式 PNG 在人物层内整数放大 4 倍，人物层再以 0.75 倍显示，最终每个源像素严格成为 3×3。
+        // x 加 0.5 用来让 320 宽贴图经过 0.75 倍后落在整数屏幕像素；y 保持整数以让脚底准确落在 y=305。
         ConfigureBattleCharacter(
             leftCharacter,
-            ReferenceBattleLayout.LeftCharacterPosition + new Vector2(0.5f, 0.25f),
+            ReferenceBattleLayout.LeftCharacterPosition + new Vector2(0.5f, 0.0f),
             false,
-            "LeftReferenceBattleFigure");
+            "LeftBattleSpriteFigure");
         ConfigureBattleCharacter(
             rightCharacter,
-            ReferenceBattleLayout.RightCharacterPosition + new Vector2(0.5f, 0.25f),
+            ReferenceBattleLayout.RightCharacterPosition + new Vector2(0.5f, 0.0f),
             true,
-            "RightReferenceBattleFigure");
+            "RightBattleSpriteFigure");
 
         // 双状态框、人物区域和中央信息框全部读取同一份规格。
         statusHud.Position = ReferenceBattleLayout.StatusHudPosition;
@@ -164,8 +164,8 @@ public partial class BattlePresentationPolishCoordinator : Node
     }
 
     /// <summary>
-    /// 统一设置单侧人物状态节点，并把真正显示的人物改为舞台同级标准人物层。
-    /// 旧人物节点仍继续推进动画状态，但自身完全隐藏，因此不可能再把旧细长人物画到屏幕上。
+    /// 旧 AnimatedBattleCharacterControl 只保留单位与动作计时状态；真正可见的人物由独立 PNG 贴图层绘制。
+    /// 这样旧方块人、旧正式图集和旧程序补细节层都无法再次透到屏幕上。
     /// </summary>
     private static void ConfigureBattleCharacter(
         AnimatedBattleCharacterControl character,
@@ -180,18 +180,15 @@ public partial class BattlePresentationPolishCoordinator : Node
         character.Modulate = Colors.White;
         character.TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
 
-        AttachDetachedReferenceFigure(character, overlayName);
+        AttachDetachedBattleSprite(character, overlayName);
 
         // 隐藏整个旧 CanvasItem，只保留它的 _Process 与 Play/SetUnit 状态更新。
-        // 标准人物作为同级节点绘制，因此不会受到旧节点 Visible 的继承影响。
+        // PNG 人物是同级节点，因此不会继承旧节点的 Visible=false。
         character.Visible = false;
     }
 
-    /// <summary>
-    /// 把标准人物作为旧人物节点的同级节点挂到舞台上。
-    /// 这样父节点可见性、SelfModulate 和旧程序绘制都无法再影响标准人物。
-    /// </summary>
-    private static void AttachDetachedReferenceFigure(AnimatedBattleCharacterControl character, string overlayName)
+    /// <summary>把真实 PNG 战斗人物作为旧状态节点的同级节点挂到舞台上。</summary>
+    private static void AttachDetachedBattleSprite(AnimatedBattleCharacterControl character, string overlayName)
     {
         Node? parent = character.GetParent();
         if (parent is null)
@@ -199,16 +196,21 @@ public partial class BattlePresentationPolishCoordinator : Node
             return;
         }
 
-        // 清掉上一版曾挂在旧人物内部的标准人物，避免升级后出现重复绘制。
-        foreach (ReferenceBattleFigureControl nested in character.GetChildren().OfType<ReferenceBattleFigureControl>())
+        // 清掉上一轮的程序标准人物，不允许它与真实 PNG 同时存在。
+        foreach (ReferenceBattleFigureControl oldReference in parent.GetChildren().OfType<ReferenceBattleFigureControl>())
         {
-            nested.Visible = false;
-            nested.SetProcess(false);
-            nested.QueueFree();
+            oldReference.Visible = false;
+            oldReference.SetProcess(false);
+            oldReference.QueueFree();
         }
 
-        // 同一舞台已经存在正确的独立人物层时只重新绑定布局，不再重复创建。
-        ReferenceBattleFigureControl? existing = parent.GetNodeOrNull<ReferenceBattleFigureControl>(overlayName);
+        foreach (CinematicBattleFigureControl oldCinematic in character.GetChildren().OfType<CinematicBattleFigureControl>())
+        {
+            oldCinematic.Visible = false;
+            oldCinematic.SetProcess(false);
+        }
+
+        BattleSpriteFigureControl? existing = parent.GetNodeOrNull<BattleSpriteFigureControl>(overlayName);
         if (existing is not null)
         {
             existing.Position = character.Position;
@@ -221,7 +223,7 @@ public partial class BattlePresentationPolishCoordinator : Node
             return;
         }
 
-        ReferenceBattleFigureControl overlay = new()
+        BattleSpriteFigureControl overlay = new()
         {
             Name = overlayName,
             Position = character.Position,
