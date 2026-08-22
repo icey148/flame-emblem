@@ -6,8 +6,8 @@ namespace FlameEmblem.Visual;
 
 /// <summary>
 /// 最终战斗画面真正显示的人物层。
-/// 本层只绘制用户已经确认的正式人物设计稿，并读取隐藏状态节点的单位与动作时间；
-/// 不再绘制旧 96×96 方块人物，也不修改任何战斗规则。
+/// 已完成角色优先绘制用户确认的正式设计稿；尚未补齐正式全身图的角色临时绘制安全角色图集，
+/// 读取隐藏状态节点的单位与动作时间，不修改任何战斗规则。
 /// </summary>
 public partial class BattleSpriteFigureControl : Control
 {
@@ -22,6 +22,9 @@ public partial class BattleSpriteFigureControl : Control
 
     /// <summary>读取隐藏状态节点中的动作播放时间。</summary>
     private FieldInfo? _elapsedField;
+
+    /// <summary>低于等于这个尺寸的纹理视为安全角色图集回退帧，必须使用最近邻显示。</summary>
+    private const int LowResolutionFallbackThreshold = 128;
 
     /// <summary>物理攻击时间与现有战斗时间线保持一致。</summary>
     private const float AttackDuration = 0.34f;
@@ -51,7 +54,7 @@ public partial class BattleSpriteFigureControl : Control
         QueueRedraw();
     }
 
-    /// <summary>绘制正式人物；没有已确认资源的角色保持空白。</summary>
+    /// <summary>绘制当前人物；正式稿缺失时由资源目录返回安全角色图集，避免出现纯黑影。</summary>
     public override void _Draw()
     {
         UnitModel? unit = ReadUnit();
@@ -66,13 +69,18 @@ public partial class BattleSpriteFigureControl : Control
             return;
         }
 
+        bool lowResolutionFallback = IsLowResolutionFallback(texture);
+        TextureFilter = lowResolutionFallback
+            ? TextureFilterEnum.Nearest
+            : TextureFilterEnum.Linear;
+
         CharacterAnimationState state = ReadState();
         float elapsed = ReadElapsed();
         Vector2 motion = ResolveMotion(state, elapsed);
         float opacity = ResolveOpacity(state, elapsed);
 
         DrawGround(unit, motion, opacity);
-        DrawApprovedFigure(texture, motion, opacity);
+        DrawFigure(texture, motion, opacity, lowResolutionFallback);
     }
 
     /// <summary>绘制低矮阴影和阵营色落脚线，使人物在纯黑背景上有明确接地感。</summary>
@@ -92,10 +100,10 @@ public partial class BattleSpriteFigureControl : Control
     }
 
     /// <summary>
-    /// 等比缩放正式设计稿，使人物尽量占满上半区并把脚底锁到统一基准线。
-    /// 设计稿本身已经按照敌左我右的方向制作，因此这里不再对高精度人物做镜像变形。
+    /// 等比缩放人物，使脚底锁到统一基准线。
+    /// 正式 WebP 已按最终敌左我右方向制作；只有旧安全图集回退帧需要按右侧站位做水平镜像。
     /// </summary>
-    private void DrawApprovedFigure(Texture2D texture, Vector2 motion, float opacity)
+    private void DrawFigure(Texture2D texture, Vector2 motion, float opacity, bool lowResolutionFallback)
     {
         float sourceWidth = Math.Max(1, texture.GetWidth());
         float sourceHeight = Math.Max(1, texture.GetHeight());
@@ -109,10 +117,28 @@ public partial class BattleSpriteFigureControl : Control
         Rect2 target = new(
             new Vector2(Mathf.Round(x), Mathf.Round(y)),
             new Vector2(Mathf.Round(targetSize.X), Mathf.Round(targetSize.Y)));
+
+        bool mirrorFallbackForRightSide = lowResolutionFallback && _source?.MirrorHorizontally == true;
+        if (mirrorFallbackForRightSide)
+        {
+            // 回退帧统一按旧图集朝向制作；围绕人物区域中心镜像后即可保持敌左我右面对面。
+            DrawSetTransform(new Vector2(Size.X, 0), 0.0f, new Vector2(-1, 1));
+            DrawTextureRect(texture, target, false, new Color(1, 1, 1, opacity));
+            DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+            return;
+        }
+
         DrawTextureRect(texture, target, false, new Color(1, 1, 1, opacity));
     }
 
-    /// <summary>正式静态设计稿只做克制的整体位移，不旋转、不扭曲人物。</summary>
+    /// <summary>判断当前纹理是否来自 96×96 左右的临时安全角色图集。</summary>
+    private static bool IsLowResolutionFallback(Texture2D texture)
+    {
+        return texture.GetWidth() <= LowResolutionFallbackThreshold &&
+               texture.GetHeight() <= LowResolutionFallbackThreshold;
+    }
+
+    /// <summary>正式人物与回退人物都只做克制的整体位移，不旋转、不扭曲纹理。</summary>
     private Vector2 ResolveMotion(CharacterAnimationState state, float elapsed)
     {
         if (_source is null)
@@ -140,7 +166,7 @@ public partial class BattleSpriteFigureControl : Control
         return new Vector2(Mathf.Round(motion.X), Mathf.Round(motion.Y));
     }
 
-    /// <summary>攻击阶段只做短后撤、快速突进、收势三段，保持人物本身的正式美术不被变形。</summary>
+    /// <summary>攻击阶段只做短后撤、快速突进、收势三段，保持人物本身的美术不被变形。</summary>
     private static Vector2 ResolveAttackMotion(float elapsed, float direction)
     {
         float t = Mathf.Clamp(elapsed / AttackDuration, 0.0f, 1.0f);
