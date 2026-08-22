@@ -1,24 +1,28 @@
 using Godot;
+using System.Text;
 
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 加载以 Base64 文本保存的正式角色 PNG 图集。
-/// 运行时只在首次使用时解码一次，不联网、不生成图像，也不参与任何战斗规则；
-/// 解码后的结果仍然是普通 ImageTexture。
+/// 加载拆分保存的 Base64 正式角色 PNG 图集。
+/// 每套图集拆成三个小文本片段，避免仓库写入通道截断单个大文件；
+/// 运行时只做固定文本拼接与 PNG 解码，不联网、不生成角色内容，也不参与任何战斗规则。
 /// </summary>
 public static class EmbeddedCharacterArtCatalog
 {
-    /// <summary>缓存已经解码成功的角色图集，避免重复解析 Base64 和 PNG。</summary>
+    /// <summary>每套正式图集固定拆成三个 Base64 片段。</summary>
+    private const int SheetPartCount = 3;
+
+    /// <summary>缓存已经解码成功的角色图集，避免重复拼接 Base64 和 PNG。</summary>
     private static readonly Dictionary<string, Texture2D> SheetCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// 记录已经确认加载失败的素材键。
-    /// 这样即使某个资源文件损坏，也只尝试一次并自动回退，不会在每个绘制帧重复刷错误日志。
+    /// 记录已经确认缺少分段素材或加载失败的素材键。
+    /// 失败后直接回退程序人物，避免头像/地图/战斗绘制循环重复检查文件。
     /// </summary>
     private static readonly HashSet<string> FailedSheetKeys = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>尝试读取 res://assets/characters/&lt;key&gt;/sheet.b64 并解码为纹理。</summary>
+    /// <summary>尝试读取 sheet.0.b64～sheet.2.b64，拼接后解码为完整正式角色纹理。</summary>
     public static Texture2D? TryLoadSheet(string key)
     {
         string normalizedKey = key.Trim().ToLowerInvariant().Replace(' ', '_');
@@ -27,39 +31,50 @@ public static class EmbeddedCharacterArtCatalog
             return cached;
         }
 
-        // 已经确认失败的资源不再重复解码，防止头像/地图/战斗绘制循环持续刷同一条错误。
         if (FailedSheetKeys.Contains(normalizedKey))
         {
             return null;
         }
 
-        string path = $"res://assets/characters/{normalizedKey}/sheet.b64";
-
-        // 项目启用了 .NET 隐式 using，System.IO.FileAccess 会与 Godot.FileAccess 同名。
-        // 这里显式使用 Godot.FileAccess，确保调用的是 Godot 的 res:// 文件系统接口。
-        if (!Godot.FileAccess.FileExists(path))
-        {
-            FailedSheetKeys.Add(normalizedKey);
-            return null;
-        }
-
         try
         {
-            // Base64 文件只包含 PNG 字节的文本编码；去掉首尾空白后交给 .NET 固定解码。
-            string encoded = Godot.FileAccess.GetFileAsString(path).Trim();
-            if (string.IsNullOrWhiteSpace(encoded))
+            StringBuilder encodedBuilder = new();
+            for (int partIndex = 0; partIndex < SheetPartCount; partIndex++)
             {
-                FailedSheetKeys.Add(normalizedKey);
-                return null;
+                string partPath = $"res://assets/characters/{normalizedKey}/sheet.{partIndex}.b64";
+
+                // 显式使用 Godot.FileAccess，避免与 System.IO.FileAccess 的枚举名称发生歧义。
+                if (!Godot.FileAccess.FileExists(partPath))
+                {
+                    FailedSheetKeys.Add(normalizedKey);
+                    return null;
+                }
+
+                string part = Godot.FileAccess.GetFileAsString(partPath).Trim();
+                if (string.IsNullOrEmpty(part))
+                {
+                    FailedSheetKeys.Add(normalizedKey);
+                    return null;
+                }
+
+                encodedBuilder.Append(part);
             }
 
-            byte[] pngBytes = Convert.FromBase64String(encoded);
+            byte[] pngBytes = Convert.FromBase64String(encodedBuilder.ToString());
             Image image = new();
             Error error = image.LoadPngFromBuffer(pngBytes);
             if (error != Error.Ok)
             {
                 FailedSheetKeys.Add(normalizedKey);
-                GD.PushWarning($"角色图集 {path} PNG 解码失败：{error}。本次运行将回退到程序人物。\n");
+                GD.PushWarning($"角色分段图集 {normalizedKey} PNG 解码失败：{error}。本次运行将回退到程序人物。");
+                return null;
+            }
+
+            // 统一图集必须保持固定尺寸，否则切片坐标会读取到错误区域。
+            if (image.GetWidth() != 512 || image.GetHeight() != 576)
+            {
+                FailedSheetKeys.Add(normalizedKey);
+                GD.PushWarning($"角色分段图集 {normalizedKey} 尺寸不是 512×576，本次运行将回退到程序人物。");
                 return null;
             }
 
@@ -70,7 +85,7 @@ public static class EmbeddedCharacterArtCatalog
         catch (Exception exception)
         {
             FailedSheetKeys.Add(normalizedKey);
-            GD.PushWarning($"角色图集 {path} 读取失败：{exception.Message}。本次运行将回退到程序人物。\n");
+            GD.PushWarning($"角色分段图集 {normalizedKey} 读取失败：{exception.Message}。本次运行将回退到程序人物。");
             return null;
         }
     }
