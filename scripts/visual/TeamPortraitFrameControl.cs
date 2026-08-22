@@ -46,7 +46,9 @@ public partial class TeamPortraitFrameControl : Control
 
         Color accent = TeamVisualPalette.Highlight(unit.Team).Darkened(0.12f);
         DrawRect(
-            new Rect2(new Vector2(8, bounds.Size.Y - 7), new Vector2(Math.Max(0, bounds.Size.X - 16), 2)),
+            new Rect2(
+                new Vector2(8, bounds.Size.Y - 7),
+                new Vector2(Mathf.Max(0.0f, bounds.Size.X - 16.0f), 2)),
             accent,
             true);
     }
