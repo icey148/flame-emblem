@@ -4,13 +4,16 @@ using Godot;
 namespace FlameEmblem.Visual;
 
 /// <summary>
-/// 给 CharacterPortraitControl 叠加阵营色硬边框。
-/// 不修改头像本身的正式素材/程序回退逻辑，只读取头像公开的只读人物引用并用深蓝或粉红标记阵营。
+/// 给 CharacterPortraitControl 叠加最终定稿使用的金色外框和阵营色内线。
+/// 头像本体由 ApprovedCharacterArtCatalog 提供；本控件只做轻量阵营识别，不再使用旧版 4px 粉/蓝粗边。
 /// </summary>
 public partial class TeamPortraitFrameControl : Control
 {
     /// <summary>被装饰的头像控件。</summary>
     private CharacterPortraitControl? _portrait;
+
+    /// <summary>最终界面使用的主金色。</summary>
+    private static readonly Color Gold = new("b8833f");
 
     /// <summary>绑定头像并开始逐帧刷新边框。</summary>
     public void Bind(CharacterPortraitControl portrait)
@@ -28,26 +31,23 @@ public partial class TeamPortraitFrameControl : Control
         QueueRedraw();
     }
 
-    /// <summary>绘制 4px 主色边框与 1px 高亮内线。</summary>
+    /// <summary>绘制 3px 金色外框、1px 暗金内框和 2px 阵营色底线。</summary>
     public override void _Draw()
     {
+        Rect2 bounds = new(Vector2.Zero, Size);
+        DrawRect(bounds, Gold, false, 3.0f);
+        DrawRect(bounds.Grow(-5), Gold.Darkened(0.50f), false, 1.0f);
+
         UnitModel? unit = _portrait?.DisplayedUnit;
         if (unit is null)
         {
             return;
         }
 
-        Color primary = TeamVisualPalette.Primary(unit.Team);
-        Color highlight = TeamVisualPalette.Highlight(unit.Team);
-        Rect2 bounds = new(Vector2.Zero, Size);
-
-        // 四边分别绘制，保持硬边像素风并避免圆角。
-        DrawRect(new Rect2(0, 0, bounds.Size.X, 4), primary, true);
-        DrawRect(new Rect2(0, bounds.Size.Y - 4, bounds.Size.X, 4), primary, true);
-        DrawRect(new Rect2(0, 0, 4, bounds.Size.Y), primary, true);
-        DrawRect(new Rect2(bounds.Size.X - 4, 0, 4, bounds.Size.Y), primary, true);
-
-        DrawRect(new Rect2(4, 4, bounds.Size.X - 8, 1), highlight, true);
-        DrawRect(new Rect2(4, bounds.Size.Y - 5, bounds.Size.X - 8, 1), highlight.Darkened(0.12f), true);
+        Color accent = TeamVisualPalette.Highlight(unit.Team).Darkened(0.12f);
+        DrawRect(
+            new Rect2(new Vector2(8, bounds.Size.Y - 7), new Vector2(Math.Max(0, bounds.Size.X - 16), 2)),
+            accent,
+            true);
     }
 }
